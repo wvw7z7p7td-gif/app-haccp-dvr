@@ -459,6 +459,113 @@ do $$ begin
     'T12: bucket receipts mancante o pubblico';
 end $$;
 
+-- ---------------------------------------------------------------------
+-- T13: allergeni e menu
+-- ---------------------------------------------------------------------
+reset role;
+do $$ begin
+  assert (select count(*) from allergens) = 14, 'T13: il catalogo deve avere 14 allergeni';
+end $$;
+
+select pg_temp.login(current_setting('t.ua')::uuid);
+do $$
+declare
+  it uuid := gen_random_uuid();
+  g uuid; m uuid; e uuid;
+  rev timestamptz;
+begin
+  select id into g from allergens where code = 'GLUTEN';
+  select id into m from allergens where code = 'MILK';
+  select id into e from allergens where code = 'EGGS';
+
+  insert into menu_items (id, company_id, name, category, ingredients)
+  values (it, current_setting('t.co1')::uuid, 'Tagliatelle al ragu', 'Primi', 'farina, uova, carne');
+  perform set_config('t.item', it::text, true);
+  assert (select allergens_reviewed_at from menu_items where id = it) is null,
+    'T13: un piatto nuovo deve risultare da verificare';
+
+  -- scrittura diretta sulla matrice: vietata
+  begin
+    insert into menu_item_allergens (company_id, item_id, allergen_id, level)
+    values (current_setting('t.co1')::uuid, it, g, 'contains');
+    raise exception 'T13: scrittura diretta sulla matrice consentita';
+  exception when insufficient_privilege then null;
+  end;
+
+  perform set_menu_item_allergens(it, array[g, e], array[m]);
+  assert (select count(*) from menu_item_allergens where item_id = it and level = 'contains') = 2,
+    'T13: allergeni "contiene" errati';
+  assert (select count(*) from menu_item_allergens where item_id = it and level = 'traces') = 1,
+    'T13: allergeni "tracce" errati';
+  select allergens_reviewed_at into rev from menu_items where id = it;
+  assert rev is not null, 'T13: verifica non registrata';
+
+  -- stesso allergene in entrambi i livelli
+  begin
+    perform set_menu_item_allergens(it, array[g], array[g]);
+    raise exception 'T13: allergene sia contiene sia tracce accettato';
+  exception when raise_exception then
+    if sqlerrm like 'T13:%' then raise; end if;
+  end;
+
+  -- allergene inesistente
+  begin
+    perform set_menu_item_allergens(it, array[gen_random_uuid()], '{}');
+    raise exception 'T13: allergene inesistente accettato';
+  exception when raise_exception then
+    if sqlerrm like 'T13:%' then raise; end if;
+  end;
+
+  -- la matrice precedente e' rimasta intatta dopo i tentativi falliti
+  assert (select count(*) from menu_item_allergens where item_id = it) = 3, 'T13: matrice alterata';
+
+  -- cambiare gli ingredienti azzera la verifica; cambiare solo il nome no
+  update menu_items set name = 'Tagliatelle al ragu'' bolognese' where id = it;
+  assert (select allergens_reviewed_at from menu_items where id = it) is not null,
+    'T13: il cambio nome non deve azzerare la verifica';
+  update menu_items set ingredients = 'farina, uova, carne, burro' where id = it;
+  assert (select allergens_reviewed_at from menu_items where id = it) is null,
+    'T13: il cambio ingredienti deve azzerare la verifica';
+
+  -- audit
+  assert exists (select 1 from audit_log where table_name = 'menu_item_allergens'),
+    'T13: audit della matrice mancante';
+end $$;
+
+-- operatore: legge ma non modifica
+select pg_temp.login(current_setting('t.ub')::uuid);
+do $$ begin
+  assert (select count(*) from menu_items) = 1, 'T13: l''operatore non legge il menu';
+  begin
+    insert into menu_items (company_id, name) values (current_setting('t.co1')::uuid, 'Abusivo');
+    raise exception 'T13: operatore ha creato un piatto';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform set_menu_item_allergens(current_setting('t.item')::uuid, '{}', '{}');
+    raise exception 'T13: operatore ha modificato gli allergeni';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+-- consulente: lettura della matrice
+select pg_temp.login(current_setting('t.ud')::uuid);
+do $$ begin
+  assert (select count(*) from menu_item_allergens) = 3, 'T13: il consulente non legge la matrice';
+end $$;
+
+-- altra azienda: isolamento
+reset role; select pg_temp.login(current_setting('t.uc')::uuid);
+do $$ begin
+  assert (select count(*) from menu_items) = 0, 'T13: C vede il menu di un''altra azienda';
+  assert (select count(*) from menu_item_allergens) = 0, 'T13: C vede la matrice di un''altra azienda';
+  begin
+    perform set_menu_item_allergens(current_setting('t.item')::uuid, '{}', '{}');
+    raise exception 'T13: C ha modificato allergeni di un''altra azienda';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
 reset role;
 rollback;
 \echo 'TUTTI I TEST DATABASE SUPERATI'
