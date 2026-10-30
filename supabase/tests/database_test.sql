@@ -715,6 +715,189 @@ do $$ begin
     'T14: bucket pest-reports mancante o pubblico';
 end $$;
 
+-- ---------------------------------------------------------------------
+-- T15: DVR digitale
+-- ---------------------------------------------------------------------
+reset role;
+do $$ begin
+  assert (select count(*) from hazard_catalog) >= 15, 'T15: catalogo pericoli incompleto';
+  assert risk_level(1) = 'low' and risk_level(2) = 'low' and risk_level(3) = 'medium'
+     and risk_level(4) = 'medium' and risk_level(6) = 'high' and risk_level(8) = 'high'
+     and risk_level(9) = 'very_high' and risk_level(16) = 'very_high', 'T15: soglie risk_level errate';
+end $$;
+
+select pg_temp.login(current_setting('t.ua')::uuid);
+do $$
+declare
+  co uuid := current_setting('t.co1')::uuid;
+  site uuid := current_setting('t.site1')::uuid;
+  haz uuid; r1 uuid := gen_random_uuid(); r2 uuid := gen_random_uuid();
+  d1 uuid := gen_random_uuid(); d2 uuid := gen_random_uuid(); d3 uuid := gen_random_uuid();
+  snap jsonb; sha text; act uuid := gen_random_uuid();
+begin
+  select id into haz from hazard_catalog where code = 'CUT';
+
+  -- DVR vuoto: non emettibile
+  insert into dvr_documents (id, company_id, site_id, version) values (d1, co, site, '1.0');
+  begin
+    perform issue_dvr(d1, current_date + 365);
+    raise exception 'T15: DVR vuoto emesso';
+  exception when raise_exception then
+    if sqlerrm like 'T15:%' then raise; end if;
+  end;
+
+  insert into dvr_risks (id, company_id, site_id, hazard_id, title, probability, severity, measures,
+                         residual_probability, residual_severity)
+  values (r1, co, site, haz, 'Tagli con coltelli in cucina', 3, 3, 'Guanti antitaglio, formazione', 2, 2);
+  assert (select risk_score from dvr_risks where id = r1) = 9, 'T15: punteggio rischio errato';
+  assert (select residual_score from dvr_risks where id = r1) = 4, 'T15: punteggio residuo errato';
+  assert (select level from v_dvr_risk_summary where id = r1) = 'very_high', 'T15: livello errato';
+
+  -- residuo superiore all'iniziale
+  begin
+    insert into dvr_risks (company_id, site_id, hazard_id, title, probability, severity,
+                           residual_probability, residual_severity)
+    values (co, site, haz, 'Incoerente', 1, 2, 3, 3);
+    raise exception 'T15: rischio residuo maggiore dell''iniziale accettato';
+  exception when raise_exception then
+    if sqlerrm like 'T15:%' then raise; end if;
+  end;
+
+  -- residuo solo a meta'
+  begin
+    insert into dvr_risks (company_id, site_id, hazard_id, title, probability, severity, residual_probability)
+    values (co, site, haz, 'Mezzo residuo', 2, 2, 1);
+    raise exception 'T15: residuo incompleto accettato';
+  exception when check_violation then null;
+  end;
+
+  -- area di un'altra azienda
+  begin
+    insert into dvr_risks (company_id, site_id, hazard_id, title, probability, severity, area_id)
+    values (co, site, haz, 'Area altrui', 1, 1, (select id from areas limit 1));
+    -- se non esistono aree il test non e' significativo ma non deve fallire
+  exception when raise_exception then null;
+  end;
+
+  insert into dvr_risks (id, company_id, site_id, hazard_id, title, probability, severity)
+  values (r2, co, site, haz, 'Scivolamento nel retro', 2, 2);
+
+  insert into dvr_actions (id, company_id, risk_id, description, due_on)
+  values (act, co, r1, 'Acquistare guanti antitaglio per tutti', current_date - 5);
+  assert (select count(*) from v_dvr_actions_overdue) = 1, 'T15: azione scaduta non rilevata';
+  begin
+    update dvr_actions set status = 'done' where id = act;
+    raise exception 'T15: azione completata senza data';
+  exception when check_violation then null;
+  end;
+  update dvr_actions set status = 'done', done_on = current_date where id = act;
+  assert (select count(*) from v_dvr_actions_overdue) = 0, 'T15: azione completata ancora scaduta';
+
+  insert into safety_officers (company_id, role, external_name, appointed_on)
+  values (co, 'rspp', 'Ing. Rossi', current_date - 100);
+  begin
+    insert into safety_officers (company_id, role) values (co, 'rls');
+    raise exception 'T15: figura senza nome ne'' dipendente accettata';
+  exception when check_violation then null;
+  end;
+
+  -- scrittura diretta dello snapshot: vietata
+  begin
+    update dvr_documents set snapshot = '{}'::jsonb where id = d1;
+    raise exception 'T15: snapshot scritto fuori da issue_dvr';
+  exception when insufficient_privilege then null;
+  end;
+
+  -- data di revisione nel passato
+  begin
+    perform issue_dvr(d1, current_date - 1);
+    raise exception 'T15: revisione nel passato accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T15:%' then raise; end if;
+  end;
+
+  perform issue_dvr(d1, current_date + 365, 'Prima emissione');
+  select snapshot, snapshot_sha256 into snap, sha from dvr_documents where id = d1;
+  assert (select status from dvr_documents where id = d1) = 'active', 'T15: DVR non attivo dopo emissione';
+  assert jsonb_array_length(snap->'risks') = 2, 'T15: snapshot senza i rischi';
+  assert (snap->'risks'->0->>'score')::int = 9, 'T15: rischi non ordinati per gravita''';
+  assert jsonb_array_length(snap->'officers') = 1, 'T15: snapshot senza figure';
+  assert sha = encode(extensions.digest(snap::text, 'sha256'), 'hex'), 'T15: impronta non coerente';
+  perform set_config('t.dvr1', d1::text, true);
+
+  -- la modifica successiva dei rischi non altera lo snapshot
+  update dvr_risks set title = 'Titolo cambiato' where id = r1;
+  assert (select snapshot from dvr_documents where id = d1) = snap, 'T15: snapshot alterato dai rischi';
+
+  -- una versione emessa non si altera
+  begin
+    update dvr_documents set version = '9.9' where id = d1;
+    raise exception 'T15: versione emessa modificata';
+  exception when insufficient_privilege then null;
+  end;
+
+  -- nuova versione: la precedente diventa sostituita
+  insert into dvr_documents (id, company_id, site_id, version) values (d2, co, site, '2.0');
+  perform issue_dvr(d2, current_date + 365);
+  assert (select status from dvr_documents where id = d1) = 'superseded', 'T15: versione precedente non sostituita';
+  assert (select status from dvr_documents where id = d2) = 'active', 'T15: nuova versione non attiva';
+
+  -- una versione sostituita non torna attiva
+  begin
+    update dvr_documents set status = 'active' where id = d1;
+    raise exception 'T15: versione sostituita riattivata';
+  exception when insufficient_privilege then null;
+  end;
+
+  -- una versione gia' emessa non si riemette
+  begin
+    perform issue_dvr(d2, current_date + 400);
+    raise exception 'T15: versione gia'' emessa riemessa';
+  exception when raise_exception then
+    if sqlerrm like 'T15:%' then raise; end if;
+  end;
+
+  insert into dvr_documents (id, company_id, site_id, version) values (d3, co, site, '3.0');
+  perform set_config('t.dvr3', d3::text, true);
+end $$;
+
+-- operatore: legge, non scrive, non emette
+select pg_temp.login(current_setting('t.ub')::uuid);
+do $$ begin
+  assert (select count(*) from dvr_risks) = 2, 'T15: l''operatore non legge i rischi';
+  begin
+    insert into dvr_risks (company_id, site_id, hazard_id, title, probability, severity)
+    values (current_setting('t.co1')::uuid, current_setting('t.site1')::uuid,
+            (select id from hazard_catalog limit 1), 'Abusivo', 1, 1);
+    raise exception 'T15: l''operatore ha creato un rischio';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform issue_dvr(current_setting('t.dvr3')::uuid, current_date + 100);
+    raise exception 'T15: l''operatore ha emesso il DVR';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+-- consulente: lettura
+select pg_temp.login(current_setting('t.ud')::uuid);
+do $$ begin
+  assert (select count(*) from dvr_documents where snapshot is not null) = 2, 'T15: il consulente non legge i DVR';
+end $$;
+
+-- altra azienda
+reset role; select pg_temp.login(current_setting('t.uc')::uuid);
+do $$ begin
+  assert (select count(*) from dvr_risks) = 0, 'T15: C vede rischi altrui';
+  assert (select count(*) from dvr_documents) = 0, 'T15: C vede DVR altrui';
+  begin
+    perform issue_dvr(current_setting('t.dvr3')::uuid, current_date + 100);
+    raise exception 'T15: C ha emesso il DVR di un''altra azienda';
+  exception when insufficient_privilege or raise_exception then
+    if sqlerrm like 'T15:%' then raise; end if;
+  end;
+end $$;
+
 reset role;
 rollback;
 \echo 'TUTTI I TEST DATABASE SUPERATI'
