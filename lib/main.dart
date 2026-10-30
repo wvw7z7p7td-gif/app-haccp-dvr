@@ -11,6 +11,6 @@ Future<void> main() async {
   assert(Env.supabaseUrl.isNotEmpty && Env.supabaseAnonKey.isNotEmpty,
       'Passare SUPABASE_URL e SUPABASE_ANON_KEY con --dart-define');
   await initializeDateFormatting('it_IT');
-  await Supabase.initialize(url: Env.supabaseUrl, anonKey: Env.supabaseAnonKey);
+  await Supabase.initialize(url: Env.supabaseUrl, publishableKey: Env.supabaseAnonKey);
   runApp(const ProviderScope(child: App()));
 }

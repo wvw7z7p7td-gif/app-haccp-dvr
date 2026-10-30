@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -408,7 +407,7 @@ class _LineEditor extends StatelessWidget {
     final df = DateFormat('dd/MM/yyyy');
     final check = draft.check(receivedOn);
     final outcome = draft.effective(check);
-    final decimal = const TextInputType.numberWithOptions(decimal: true, signed: true);
+    const decimal = TextInputType.numberWithOptions(decimal: true, signed: true);
     final numFmt = [FilteringTextInputFormatter.allow(RegExp(r'[-0-9,.]'))];
 
     return Card(
