@@ -69,7 +69,6 @@ class CleaningRepository {
       sigHash = await _uploadSignature(sigPath, signaturePng);
     }
 
-    var logExists = false;
     try {
       await _db.from('cleaning_logs').insert({
         'id': logId,
@@ -85,12 +84,13 @@ class CleaningRepository {
         'signature_hash': sigHash,
       });
     } on PostgrestException catch (e) {
-      if (e.code != '23505') rethrow;
-      logExists = true;
+      if (e.code != '23505') rethrow; // intestazione gia' registrata
     }
 
-    if (status == CleaningStatus.done && plan.items.isNotEmpty && !logExists) {
-      await _db.from('cleaning_log_items').insert([
+    // Anche se l'intestazione esisteva: un tentativo precedente potrebbe essersi
+    // fermato prima delle voci. Le voci gia' presenti vengono ignorate.
+    if (status == CleaningStatus.done && plan.items.isNotEmpty) {
+      await _db.from('cleaning_log_items').upsert([
         for (final item in plan.items)
           {
             'id': itemIds[item.id],
@@ -99,7 +99,7 @@ class CleaningRepository {
             'plan_item_id': item.id,
             'done': true,
           }
-      ]);
+      ], onConflict: 'id', ignoreDuplicates: true);
     }
   }
 

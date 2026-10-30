@@ -327,6 +327,138 @@ do $$ begin
   end;
 end $$;
 
+-- ---------------------------------------------------------------------
+-- T12: ricevimento merci
+-- ---------------------------------------------------------------------
+reset role;
+do $$
+declare s2 uuid;
+begin
+  insert into suppliers (company_id, name) values (current_setting('t.co2')::uuid, 'Fornitore Azienda 2')
+  returning id into s2;
+  perform set_config('t.sup2', s2::text, true);
+end $$;
+
+select pg_temp.login(current_setting('t.ub')::uuid);
+do $$
+declare
+  s uuid := gen_random_uuid(); rc uuid := gen_random_uuid(); rc2 uuid := gen_random_uuid();
+  l1 uuid := gen_random_uuid(); l2 uuid := gen_random_uuid();
+  h1 text; ph2 text; tout boolean; ex boolean;
+begin
+  insert into suppliers (id, company_id, name) values (s, current_setting('t.co1')::uuid, 'Fornitore Test');
+
+  -- fornitore di un'altra azienda
+  begin
+    insert into goods_receipts (id, company_id, site_id, supplier_id, doc_date, received_at)
+    values (gen_random_uuid(), current_setting('t.co1')::uuid, current_setting('t.site1')::uuid,
+            current_setting('t.sup2')::uuid, current_date, now());
+    raise exception 'T12: fornitore di un''altra azienda accettato';
+  exception when raise_exception then
+    if sqlerrm like 'T12:%' then raise; end if;
+  end;
+
+  insert into goods_receipts (id, company_id, site_id, supplier_id, doc_number, doc_date, received_at, employee_id)
+  values (rc, current_setting('t.co1')::uuid, current_setting('t.site1')::uuid, s, 'DDT-1',
+          current_date, now(), current_setting('t.emp_b')::uuid);
+
+  -- fuori temperatura ma "accettato": bloccato
+  begin
+    insert into goods_receipt_lines (id, company_id, receipt_id, product_name, lot_code, temp_c, max_limit_c, outcome)
+    values (gen_random_uuid(), current_setting('t.co1')::uuid, rc, 'Latte', 'LT-1', 9.0, 4.0, 'accepted');
+    raise exception 'T12: prodotto fuori temperatura accettato senza riserva';
+  exception when raise_exception then
+    if sqlerrm like 'T12:%' then raise; end if;
+  end;
+
+  -- scadenza superata ma solo "con riserva": bloccato
+  begin
+    insert into goods_receipt_lines (id, company_id, receipt_id, product_name, lot_code, expiry_date, expiry_kind, outcome, notes)
+    values (gen_random_uuid(), current_setting('t.co1')::uuid, rc, 'Yogurt', 'YG-1',
+            current_date - 1, 'use_by', 'accepted_with_reservation', 'scaduto ieri');
+    raise exception 'T12: scadenza superata accettata con riserva';
+  exception when raise_exception then
+    if sqlerrm like 'T12:%' then raise; end if;
+  end;
+
+  -- respinto senza motivo: vincolo di controllo
+  begin
+    insert into goods_receipt_lines (id, company_id, receipt_id, product_name, lot_code, outcome)
+    values (gen_random_uuid(), current_setting('t.co1')::uuid, rc, 'Burro', 'BR-1', 'rejected');
+    raise exception 'T12: respinto senza motivo accettato';
+  exception when check_violation then null;
+  end;
+
+  -- riga respinta con motivo: flag calcolati
+  insert into goods_receipt_lines (id, company_id, receipt_id, product_name, lot_code, temp_c, max_limit_c, outcome, notes)
+  values (l1, current_setting('t.co1')::uuid, rc, 'Latte fresco', 'LT-2', 9.0, 4.0, 'rejected', 'Temperatura oltre il limite');
+  select temp_out_of_range, expired into tout, ex from goods_receipt_lines where id = l1;
+  assert tout and not ex, 'T12: flag temperatura/scadenza non calcolati';
+
+  -- riga accettata normale, con lotto ricercabile
+  insert into goods_receipt_lines (id, company_id, receipt_id, product_name, lot_code, temp_c, max_limit_c, expiry_date)
+  values (l2, current_setting('t.co1')::uuid, rc, 'Mozzarella', 'ABC-123', 3.0, 4.0, current_date + 5);
+  assert (select count(*) from goods_receipt_lines where lower(lot_code) like '%abc-1%') = 1,
+    'T12: ricerca per lotto non trova la riga';
+
+  -- hash chain tra due ricevimenti
+  insert into goods_receipts (id, company_id, site_id, supplier_id, doc_date, received_at)
+  values (rc2, current_setting('t.co1')::uuid, current_setting('t.site1')::uuid, s, current_date, now());
+  select row_hash into h1 from goods_receipts where id = rc;
+  select prev_hash into ph2 from goods_receipts where id = rc2;
+  assert h1 is not null and ph2 = h1, 'T12: hash chain dei ricevimenti non collegata';
+
+  -- viste
+  assert (select rejected_count from v_receipt_summary where receipt_id = rc) = 1, 'T12: v_receipt_summary errata';
+  assert (select rejected_12m from v_supplier_stats where supplier_id = s) = 1, 'T12: v_supplier_stats errata';
+
+  -- ritiro
+  insert into product_recalls (id, company_id, line_id, lot_code, product_name, action, reason, performed_at)
+  values (gen_random_uuid(), current_setting('t.co1')::uuid, l2, 'ABC-123', 'Mozzarella',
+          'discarded', 'Richiamo del produttore', now());
+end $$;
+
+-- consulente: legge ma non registra
+select pg_temp.login(current_setting('t.ud')::uuid);
+do $$ begin
+  assert (select count(*) from goods_receipts) = 2, 'T12: il consulente non legge i ricevimenti';
+  begin
+    insert into suppliers (company_id, name) values (current_setting('t.co1')::uuid, 'Intruso');
+    raise exception 'T12: il consulente ha creato un fornitore';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+-- isolamento: C non vede nulla dell'azienda 1
+reset role; select pg_temp.login(current_setting('t.uc')::uuid);
+do $$ begin
+  assert (select count(*) from goods_receipts) = 0, 'T12: C vede i ricevimenti di un''altra azienda';
+  assert (select count(*) from goods_receipt_lines) = 0, 'T12: C vede le righe di un''altra azienda';
+  assert (select count(*) from suppliers) = 1, 'T12: C vede fornitori di altre aziende';
+end $$;
+
+-- immutabilita' dei registri
+reset role;
+do $$ begin
+  begin
+    update goods_receipt_lines set lot_code = 'MOD';
+    raise exception 'T12: update delle righe NON bloccato';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from goods_receipts;
+    raise exception 'T12: delete dei ricevimenti NON bloccato';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update product_recalls set reason = 'x';
+    raise exception 'T12: update dei ritiri NON bloccato';
+  exception when insufficient_privilege then null;
+  end;
+  assert exists (select 1 from storage.buckets where id = 'receipts' and not public),
+    'T12: bucket receipts mancante o pubblico';
+end $$;
+
 reset role;
 rollback;
 \echo 'TUTTI I TEST DATABASE SUPERATI'
