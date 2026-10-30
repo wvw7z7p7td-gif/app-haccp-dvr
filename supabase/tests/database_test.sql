@@ -1250,6 +1250,160 @@ do $$ begin
   assert exists (select 1 from storage.buckets where id = 'hr-docs' and not public), 'T17: bucket hr-docs mancante';
 end $$;
 
+-- ---------------------------------------------------------------------
+-- T18: infortuni e near-miss
+-- ---------------------------------------------------------------------
+reset role;
+select pg_temp.login(current_setting('t.ub')::uuid);
+do $$
+declare
+  co uuid := current_setting('t.co1')::uuid;
+  emp uuid := current_setting('t.emp_c')::uuid;
+  inj uuid := gen_random_uuid(); nm uuid := gen_random_uuid(); inj2 uuid := gen_random_uuid();
+  h1 text; ph2 text;
+begin
+  -- infortunio senza persona
+  begin
+    insert into incidents (id, company_id, kind, occurred_at, description, severity)
+    values (gen_random_uuid(), co, 'injury', now(), 'Taglio', 'medical');
+    raise exception 'T18: infortunio senza persona accettato';
+  exception when check_violation then null;
+  end;
+  -- near miss con gravita'
+  begin
+    insert into incidents (id, company_id, kind, occurred_at, description, severity)
+    values (gen_random_uuid(), co, 'near_miss', now(), 'Quasi caduta', 'medical');
+    raise exception 'T18: near miss con gravita'' accettato';
+  exception when check_violation then null;
+  end;
+  -- evento nel futuro
+  begin
+    insert into incidents (id, company_id, kind, occurred_at, description)
+    values (gen_random_uuid(), co, 'near_miss', now() + interval '2 days', 'Futuro');
+    raise exception 'T18: evento futuro accettato';
+  exception when raise_exception then
+    if sqlerrm like 'T18:%' then raise; end if;
+  end;
+  -- persona di un'altra azienda
+  begin
+    insert into incidents (id, company_id, kind, occurred_at, description, employee_id, severity)
+    values (gen_random_uuid(), co, 'injury', now(), 'Altrui', (select id from employees where company_id = current_setting('t.co2')::uuid limit 1), 'medical');
+    -- se non esiste nessun dipendente nell'azienda 2 l'insert fallisce comunque per il check sulla persona
+    raise exception 'T18: persona altrui accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T18:%' then raise; end if;
+  when check_violation then null;
+  end;
+
+  insert into incidents (id, company_id, kind, occurred_at, description, employee_id, severity, days_lost, body_part)
+  values (inj, co, 'injury', now() - interval '1 hour', 'Taglio alla mano con la affettatrice', emp, 'lost_time', 5, 'mano');
+  assert (select inail_report_required from incidents where id = inj), 'T18: denuncia INAIL non rilevata (5 giorni)';
+  insert into incidents (id, company_id, kind, occurred_at, description, employee_id, severity, days_lost)
+  values (inj2, co, 'injury', now(), 'Piccola escoriazione', emp, 'first_aid', 0);
+  assert not (select inail_report_required from incidents where id = inj2), 'T18: denuncia INAIL richiesta senza motivo';
+  insert into incidents (id, company_id, kind, occurred_at, description)
+  values (nm, co, 'near_miss', now(), 'Pavimento bagnato, quasi scivolato');
+  perform set_config('t.inj', inj::text, true); perform set_config('t.nm', nm::text, true);
+
+  select row_hash into h1 from incidents where id = inj;
+  select prev_hash into ph2 from incidents where id = inj2;
+  assert h1 is not null and ph2 = h1, 'T18: hash chain eventi non collegata';
+
+  -- chiusura senza indagine/azione
+  begin
+    insert into incident_actions (id, company_id, incident_id, step, description, performed_at)
+    values (gen_random_uuid(), co, inj, 'closure', 'Chiuso', now());
+    raise exception 'T18: chiusura senza indagine accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T18:%' then raise; end if;
+  end;
+  -- denuncia INAIL su evento che non la richiede
+  begin
+    insert into incident_actions (id, company_id, incident_id, step, description, performed_at)
+    values (gen_random_uuid(), co, nm, 'inail_report', 'Denuncia', now());
+    raise exception 'T18: denuncia INAIL su near miss accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T18:%' then raise; end if;
+  end;
+
+  insert into incident_actions (id, company_id, incident_id, step, description, performed_at)
+  values (gen_random_uuid(), co, inj, 'investigation', 'Protezione della lama rimossa dall''operatore', now());
+  insert into incident_actions (id, company_id, incident_id, step, description, performed_at)
+  values (gen_random_uuid(), co, inj, 'corrective', 'Sostituito il carter, riformazione', now());
+  -- ancora non chiudibile: manca la denuncia INAIL
+  begin
+    insert into incident_actions (id, company_id, incident_id, step, description, performed_at)
+    values (gen_random_uuid(), co, inj, 'closure', 'Chiuso', now());
+    raise exception 'T18: chiusura senza denuncia INAIL accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T18:%' then raise; end if;
+  end;
+  insert into incident_actions (id, company_id, incident_id, step, description, reference, performed_at)
+  values (gen_random_uuid(), co, inj, 'inail_report', 'Denuncia inviata', 'PROT-123', now());
+  insert into incident_actions (id, company_id, incident_id, step, description, performed_at)
+  values (gen_random_uuid(), co, inj, 'closure', 'Evento chiuso', now());
+  assert (select closed and inail_reported and investigated and has_corrective
+            from v_incident_status where incident_id = inj), 'T18: stato evento errato';
+
+  -- dopo la chiusura nessuna nuova azione
+  begin
+    insert into incident_actions (id, company_id, incident_id, step, description, performed_at)
+    values (gen_random_uuid(), co, inj, 'corrective', 'Tardiva', now());
+    raise exception 'T18: azione su evento chiuso accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T18:%' then raise; end if;
+  end;
+
+  -- near miss chiudibile con una sola azione
+  insert into incident_actions (id, company_id, incident_id, step, description, performed_at)
+  values (gen_random_uuid(), co, nm, 'corrective', 'Segnaletica pavimento bagnato', now());
+  insert into incident_actions (id, company_id, incident_id, step, description, performed_at)
+  values (gen_random_uuid(), co, nm, 'closure', 'Chiuso', now());
+end $$;
+
+-- immutabilita': senza policy di update/delete le righe non sono toccabili
+select pg_temp.login(current_setting('t.ua')::uuid);
+do $$ begin
+  update incidents set description = 'Alterato' where id = current_setting('t.inj')::uuid;
+  assert (select description from incidents where id = current_setting('t.inj')::uuid) like 'Taglio%', 'T18: evento alterato';
+  delete from incident_actions;
+  assert (select count(*) from incident_actions) >= 5, 'T18: azioni cancellate';
+end $$;
+
+-- consulente: lettura, nessuna scrittura
+select pg_temp.login(current_setting('t.ud')::uuid);
+do $$ begin
+  assert (select count(*) from incidents) = 3, 'T18: il consulente non legge gli eventi';
+  begin
+    insert into incidents (id, company_id, kind, occurred_at, description)
+    values (gen_random_uuid(), current_setting('t.co1')::uuid, 'near_miss', now(), 'Abusivo');
+    raise exception 'T18: il consulente ha segnalato un evento';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+-- altra azienda
+reset role; select pg_temp.login(current_setting('t.uc')::uuid);
+do $$ begin
+  assert (select count(*) from incidents) = 0, 'T18: C vede eventi altrui';
+  assert (select count(*) from incident_actions) = 0, 'T18: C vede azioni altrui';
+  assert (select count(*) from v_incident_status) = 0, 'T18: C vede lo stato eventi altrui';
+end $$;
+
+reset role;
+do $$ begin
+  begin
+    update incidents set description = 'x';
+    raise exception 'T18: update degli eventi NON bloccato';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from incident_actions;
+    raise exception 'T18: delete delle azioni NON bloccato';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
 reset role;
 rollback;
 \echo 'TUTTI I TEST DATABASE SUPERATI'
