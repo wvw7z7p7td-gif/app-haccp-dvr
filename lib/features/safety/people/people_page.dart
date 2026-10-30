@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/auth/providers.dart';
+import '../../../shared/widgets/operator_selector.dart' show employeesProvider;
 import '../../../shared/widgets/page_scaffold.dart';
 import '../../../shared/widgets/signature_pad.dart';
 import 'people_models.dart';
