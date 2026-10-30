@@ -1083,6 +1083,173 @@ do $$ begin
     'T16: bucket contractor-docs mancante o pubblico';
 end $$;
 
+-- ---------------------------------------------------------------------
+-- T17: persone, formazione, DPI
+-- ---------------------------------------------------------------------
+reset role;
+do $$
+declare
+  co uuid := current_setting('t.co1')::uuid;
+  co2 uuid := current_setting('t.co2')::uuid;
+  jr uuid := gen_random_uuid(); jr2 uuid := gen_random_uuid();
+  ppe uuid := gen_random_uuid(); ppe2 uuid := gen_random_uuid();
+  tt uuid; tt_other uuid := gen_random_uuid();
+  e uuid := gen_random_uuid(); ass uuid := gen_random_uuid();
+begin
+  insert into job_roles (id, company_id, name) values (jr, co, 'Cuoco'), (jr2, co2, 'Barista');
+  insert into ppe_types (id, company_id, name, category, replace_after_months) values (ppe, co, 'Guanti antitaglio', 2, 12);
+  insert into ppe_types (id, company_id, name) values (ppe2, co2, 'Scarpe');
+  insert into training_types (id, company_id, code, name) values (tt_other, co2, 'X2', 'Corso privato azienda 2');
+  select id into tt from training_types where code = 'HACCP' and company_id is null;
+  perform set_config('t.jr', jr::text, true); perform set_config('t.ppe', ppe::text, true);
+  perform set_config('t.tt', tt::text, true);
+
+  -- mansione di un'altra azienda
+  begin
+    insert into employees (company_id, job_role_id, first_name, last_name) values (co, jr2, 'A', 'B');
+    raise exception 'T17: mansione di un''altra azienda accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T17:%' then raise; end if;
+  end;
+
+  insert into employees (id, company_id, job_role_id, first_name, last_name)
+  values (e, co, jr, 'Carlo', 'Cuoco');
+  perform set_config('t.emp_c', e::text, true);
+  insert into job_role_ppe (job_role_id, ppe_type_id, company_id) values (jr, ppe, co);
+  insert into job_role_training_requirements (job_role_id, training_type_id, company_id) values (jr, tt, co);
+
+  -- DPI di un'altra azienda assegnato alla mansione
+  begin
+    insert into job_role_ppe (job_role_id, ppe_type_id, company_id) values (jr, ppe2, co);
+    raise exception 'T17: DPI di un''altra azienda legato alla mansione';
+  exception when raise_exception then
+    if sqlerrm like 'T17:%' then raise; end if;
+  end;
+
+  -- DPI mancante finche' non e' consegnato; formazione mancante
+  assert (select count(*) from v_ppe_missing where employee_id = e) = 1, 'T17: DPI mancante non rilevato';
+  assert (select count(*) from v_missing_training where employee_id = e) = 1, 'T17: formazione mancante non rilevata';
+
+  -- consegna senza firma: vietata
+  begin
+    insert into ppe_assignments (id, company_id, employee_id, ppe_type_id, delivered_on)
+    values (gen_random_uuid(), co, e, ppe, current_date);
+    raise exception 'T17: consegna DPI senza firma accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T17:%' then raise; end if;
+  end;
+
+  -- DPI di un'altra azienda consegnato
+  begin
+    insert into ppe_assignments (id, company_id, employee_id, ppe_type_id, delivered_on, signature_path, signature_hash)
+    values (gen_random_uuid(), co, e, ppe2, current_date, 'p', 'h');
+    raise exception 'T17: DPI altrui consegnato';
+  exception when raise_exception then
+    if sqlerrm like 'T17:%' then raise; end if;
+  end;
+
+  insert into ppe_assignments (id, company_id, employee_id, ppe_type_id, delivered_on, signature_path, signature_hash)
+  values (ass, co, e, ppe, current_date - 400, 'p', 'h');   -- scade dopo 12 mesi: gia' scaduto
+  assert (select count(*) from v_ppe_missing where employee_id = e) = 1, 'T17: DPI scaduto considerato valido';
+  perform set_config('t.ass', ass::text, true);
+
+  -- una consegna firmata non si altera
+  begin
+    update ppe_assignments set delivered_on = current_date where id = ass;
+    raise exception 'T17: consegna firmata alterata';
+  exception when insufficient_privilege then null;
+  end;
+
+  -- riconsegna: consentita (e prima della consegna no)
+  begin
+    update ppe_assignments set returned_on = current_date - 500 where id = ass;
+    raise exception 'T17: riconsegna prima della consegna accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T17:%' then raise; end if;
+  end;
+  update ppe_assignments set returned_on = current_date where id = ass;
+
+  insert into ppe_assignments (id, company_id, employee_id, ppe_type_id, delivered_on, signature_path, signature_hash)
+  values (gen_random_uuid(), co, e, ppe, current_date, 'p2', 'h2');
+  assert (select count(*) from v_ppe_missing where employee_id = e) = 0, 'T17: DPI consegnato risulta mancante';
+
+  -- formazione: tipo di un'altra azienda, data futura, scadenza incoerente
+  begin
+    insert into training_records (company_id, employee_id, training_type_id, issued_on)
+    values (co, e, tt_other, current_date);
+    raise exception 'T17: formazione di un''altra azienda accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T17:%' then raise; end if;
+  end;
+  begin
+    insert into training_records (company_id, employee_id, training_type_id, issued_on)
+    values (co, e, tt, current_date + 5);
+    raise exception 'T17: attestato con data futura accettato';
+  exception when raise_exception then
+    if sqlerrm like 'T17:%' then raise; end if;
+  end;
+  begin
+    insert into training_records (company_id, employee_id, training_type_id, issued_on, expires_on)
+    values (co, e, tt, current_date, current_date - 1);
+    raise exception 'T17: scadenza precedente all''attestato accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T17:%' then raise; end if;
+  end;
+
+  insert into training_records (company_id, employee_id, training_type_id, issued_on)
+  values (co, e, tt, current_date - 36*30 - 30);   -- HACCP 36 mesi: scaduto
+  assert (select count(*) from v_missing_training where employee_id = e) = 1, 'T17: formazione scaduta non mancante';
+  insert into training_records (company_id, employee_id, training_type_id, issued_on)
+  values (co, e, tt, current_date - 10);
+  assert (select count(*) from v_missing_training where employee_id = e) = 0, 'T17: formazione valida risulta mancante';
+  assert exists (select 1 from v_deadlines where kind = 'training' and employee_id = e), 'T17: scadenza formazione assente';
+
+  -- nuove voci dello scadenzario
+  insert into safety_officers (company_id, role, external_name, ends_on)
+  values (co, 'rspp', 'Ing. Bianchi', current_date + 20);
+  assert exists (select 1 from v_deadlines where kind = 'safety_officer' and days_left = 20), 'T17: scadenza incarico assente';
+end $$;
+
+-- operatore: registra consegne e formazione ma non cambia l'anagrafica
+select pg_temp.login(current_setting('t.ub')::uuid);
+do $$ begin
+  assert (select count(*) from ppe_assignments) >= 2, 'T17: l''operatore non legge le consegne';
+  insert into ppe_assignments (id, company_id, employee_id, ppe_type_id, delivered_on, signature_path, signature_hash)
+  values (gen_random_uuid(), current_setting('t.co1')::uuid, current_setting('t.emp_c')::uuid,
+          current_setting('t.ppe')::uuid, current_date, 'p3', 'h3');
+  begin
+    insert into employees (company_id, first_name, last_name) values (current_setting('t.co1')::uuid, 'Abusivo', 'X');
+    raise exception 'T17: l''operatore ha creato un dipendente';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+-- consulente: lettura
+select pg_temp.login(current_setting('t.ud')::uuid);
+do $$ begin
+  assert (select count(*) from training_records) >= 2, 'T17: il consulente non legge la formazione';
+  begin
+    insert into ppe_assignments (id, company_id, employee_id, ppe_type_id, delivered_on, signature_path, signature_hash)
+    values (gen_random_uuid(), current_setting('t.co1')::uuid, current_setting('t.emp_c')::uuid,
+            current_setting('t.ppe')::uuid, current_date, 'p4', 'h4');
+    raise exception 'T17: il consulente ha consegnato un DPI';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+-- altra azienda
+reset role; select pg_temp.login(current_setting('t.uc')::uuid);
+do $$ begin
+  assert (select count(*) from ppe_assignments) = 0, 'T17: C vede consegne altrui';
+  assert (select count(*) from v_deadlines where kind = 'safety_officer') = 0, 'T17: C vede scadenze altrui';
+  assert (select count(*) from v_ppe_missing) = 0, 'T17: C vede DPI mancanti altrui';
+end $$;
+
+reset role;
+do $$ begin
+  assert exists (select 1 from storage.buckets where id = 'hr-docs' and not public), 'T17: bucket hr-docs mancante';
+end $$;
+
 reset role;
 rollback;
 \echo 'TUTTI I TEST DATABASE SUPERATI'
