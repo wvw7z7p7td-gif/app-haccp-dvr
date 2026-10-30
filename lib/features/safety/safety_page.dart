@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../shared/widgets/page_scaffold.dart';
 import 'duvri/duvri_providers.dart';
 import 'dvr/dvr_providers.dart';
+import 'incidents/incident_providers.dart';
 import 'people/people_providers.dart';
 
 class SafetyPage extends ConsumerWidget {
@@ -76,6 +77,20 @@ class SafetyPage extends ConsumerWidget {
       data: (d) => d.totalIssues(today) > 0 || d.deadlinesWithin(today, 30).isNotEmpty,
       orElse: () => false,
     );
+    final inc = ref.watch(incidentDataProvider);
+    final incInfo = inc.when(
+      loading: () => 'Caricamento…',
+      error: (_, __) => 'Dati non disponibili',
+      data: (d) {
+        final s = d.stats(today);
+        return [
+          '${s.injuries} infortuni · ${s.nearMisses} quasi incidenti (12 mesi)',
+          if (s.open > 0) '${s.open} da chiudere',
+          if (d.inailPending > 0) '${d.inailPending} denunce INAIL',
+        ].join(' · ');
+      },
+    );
+    final incAlert = inc.maybeWhen(data: (d) => d.inailPending > 0, orElse: () => false);
     final cs = Theme.of(context).colorScheme;
     return PageScaffold(
       title: 'Sicurezza sul lavoro',
@@ -111,6 +126,17 @@ class SafetyPage extends ConsumerWidget {
             subtitle: Text(peopleInfo),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/persone'),
+          ),
+        ),
+        Card(
+          color: incAlert ? cs.errorContainer : null,
+          child: ListTile(
+            minVerticalPadding: 16,
+            leading: const Icon(Icons.healing_outlined, size: 32),
+            title: const Text('Infortuni e quasi incidenti'),
+            subtitle: Text(incInfo),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/eventi'),
           ),
         ),
       ]),
