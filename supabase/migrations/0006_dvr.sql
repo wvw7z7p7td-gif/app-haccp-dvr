@@ -141,7 +141,9 @@ begin
     select company_id into v_co from job_roles where id = NEW.job_role_id;
     if v_co is distinct from NEW.company_id then raise exception 'Mansione non valida per questa azienda'; end if;
   end if;
-  if NEW.residual_score is not null and NEW.residual_probability * NEW.residual_severity > NEW.probability * NEW.severity then
+  -- le colonne generate non sono ancora calcolate nei trigger BEFORE: uso i componenti
+  if NEW.residual_probability is not null and NEW.residual_severity is not null
+     and NEW.residual_probability * NEW.residual_severity > NEW.probability * NEW.severity then
     raise exception 'Il rischio residuo non puo'' superare il rischio iniziale';
   end if;
   return NEW;
