@@ -890,6 +890,201 @@ do $$ begin
   end;
 end $$;
 
+-- ---------------------------------------------------------------------
+-- T16: DUVRI e appaltatori
+-- ---------------------------------------------------------------------
+reset role;
+select pg_temp.login(current_setting('t.ua')::uuid);
+do $$
+declare
+  co uuid := current_setting('t.co1')::uuid;
+  site uuid := current_setting('t.site1')::uuid;
+  k uuid := gen_random_uuid(); du uuid := gen_random_uuid(); du2 uuid := gen_random_uuid();
+  sg1 uuid := gen_random_uuid(); sg2 uuid := gen_random_uuid();
+  i1 uuid := gen_random_uuid(); snap jsonb;
+begin
+  insert into contractors (id, company_id, name, vat_number, activity)
+  values (k, co, 'Impresa Pulizie Srl', '01234567890', 'Pulizie straordinarie');
+  perform set_config('t.k', k::text, true);
+
+  -- nessun documento: tutti e 4 mancanti
+  assert (select count(*) from v_contractor_compliance where contractor_id = k and not valid) = 4,
+    'T16: documenti mancanti non rilevati';
+  assert cardinality(contractor_missing_docs(k)) = 4, 'T16: contractor_missing_docs errata';
+
+  -- documento senza file non vale; con file ma scaduto non vale; con file e valido si'
+  insert into contractor_documents (company_id, contractor_id, doc_type, expires_on)
+  values (co, k, 'durc', current_date + 30);
+  assert (select count(*) from v_contractor_compliance where contractor_id = k and not valid) = 4,
+    'T16: documento senza file considerato valido';
+  insert into contractor_documents (company_id, contractor_id, doc_type, expires_on, file_path)
+  values (co, k, 'durc', current_date - 1, co || '/contractors/old.pdf');
+  assert (select count(*) from v_contractor_compliance where contractor_id = k and not valid) = 4,
+    'T16: documento scaduto considerato valido';
+  insert into contractor_documents (company_id, contractor_id, doc_type, expires_on, file_path)
+  values (co, k, 'durc', current_date + 60, co || '/contractors/ok.pdf');
+  assert (select count(*) from v_contractor_compliance where contractor_id = k and not valid) = 3,
+    'T16: DURC valido non riconosciuto';
+
+  -- DUVRI: nasce bozza; stato firmato diretto vietato
+  begin
+    insert into duvri_documents (company_id, contractor_id, activity_description, status)
+    values (co, k, 'Pulizie', 'signed');
+    raise exception 'T16: DUVRI creato gia'' firmato';
+  exception when insufficient_privilege then null;
+  end;
+  insert into duvri_documents (id, company_id, site_id, contractor_id, activity_description, areas_involved, starts_on, ends_on)
+  values (du, co, site, k, 'Pulizia canne fumarie', 'Cucina', current_date, current_date + 3);
+  perform set_config('t.duvri', du::text, true);
+
+  -- date incoerenti
+  begin
+    insert into duvri_documents (company_id, contractor_id, activity_description, starts_on, ends_on)
+    values (co, k, 'x', current_date, current_date - 1);
+    raise exception 'T16: date incoerenti accettate';
+  exception when raise_exception then
+    if sqlerrm like 'T16:%' then raise; end if;
+  end;
+
+  -- emissione senza interferenze ne' dichiarazione
+  begin
+    perform issue_duvri(du, 'ok');
+    raise exception 'T16: DUVRI emesso senza interferenze';
+  exception when raise_exception then
+    if sqlerrm like 'T16:%' then raise; end if;
+  end;
+
+  insert into duvri_interferences (id, company_id, duvri_id, description, area, measures, cost_eur)
+  values (i1, co, du, 'Presenza di personale in cucina durante i lavori', 'Cucina', 'Lavori a cucina chiusa, segnaletica', 150.50);
+  insert into duvri_interferences (company_id, duvri_id, description, measures, cost_eur)
+  values (co, du, 'Uso di prodotti chimici', 'Schede di sicurezza condivise', 49.50);
+
+  -- documenti mancanti: blocco, salvo motivazione
+  begin
+    perform issue_duvri(du);
+    raise exception 'T16: DUVRI emesso con documenti mancanti senza motivazione';
+  exception when raise_exception then
+    if sqlerrm like 'T16:%' then raise; end if;
+  end;
+  perform issue_duvri(du, 'Documenti in arrivo, lavori urgenti, approvato dal titolare');
+  select snapshot into snap from duvri_documents where id = du;
+  assert (snap->>'safety_costs_eur')::numeric = 200.00, 'T16: costi sicurezza non sommati';
+  assert (select safety_costs_eur from duvri_documents where id = du) = 200.00, 'T16: costo non registrato';
+  assert jsonb_array_length(snap->'interferences') = 2, 'T16: snapshot senza interferenze';
+  assert (snap->>'override_reason') is not null, 'T16: motivazione non registrata';
+  assert (select snapshot_sha256 from duvri_documents where id = du)
+         = encode(extensions.digest(snap::text, 'sha256'), 'hex'), 'T16: impronta errata';
+
+  -- dopo l'emissione: interferenze e contenuto bloccati
+  begin
+    insert into duvri_interferences (company_id, duvri_id, description, measures)
+    values (co, du, 'Tardiva', 'x');
+    raise exception 'T16: interferenza aggiunta dopo emissione';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update duvri_interferences set cost_eur = 0 where id = i1;
+    raise exception 'T16: interferenza modificata dopo emissione';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update duvri_documents set activity_description = 'Altro' where id = du;
+    raise exception 'T16: contenuto DUVRI modificato dopo emissione';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update duvri_documents set status = 'signed' where id = du;
+    raise exception 'T16: stato firmato impostato a mano';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform issue_duvri(du, 'ancora');
+    raise exception 'T16: DUVRI riemesso';
+  exception when raise_exception then
+    if sqlerrm like 'T16:%' then raise; end if;
+  end;
+
+  -- firme: la prima non basta
+  insert into duvri_signatures (id, company_id, duvri_id, party, signer_name, signature_path, signature_sha256)
+  values (sg1, co, du, 'employer', 'Anna Admin', co || '/duvri/' || sg1 || '.png', repeat('a', 64));
+  assert (select status from duvri_documents where id = du) = 'draft', 'T16: firmato con una sola firma';
+  -- stessa parte due volte
+  begin
+    insert into duvri_signatures (id, company_id, duvri_id, party, signer_name, signature_path, signature_sha256)
+    values (gen_random_uuid(), co, du, 'employer', 'Anna Admin', 'x', repeat('b', 64));
+    raise exception 'T16: parte firmata due volte';
+  exception when unique_violation then null;
+  end;
+  insert into duvri_signatures (id, company_id, duvri_id, party, signer_name, signature_path, signature_sha256)
+  values (sg2, co, du, 'contractor', 'Mario Rossi', co || '/duvri/' || sg2 || '.png', repeat('c', 64));
+  assert (select status from duvri_documents where id = du) = 'signed', 'T16: DUVRI non firmato con entrambe le firme';
+  assert (select signed_at from duvri_documents where id = du) is not null, 'T16: data firma mancante';
+
+  -- le firme non si modificano
+  begin
+    update duvri_signatures set signer_name = 'Altro' where id = sg1;
+    raise exception 'T16: firma modificata';
+  exception when insufficient_privilege then null;
+  end;
+
+  -- chiusura consentita, riapertura no
+  update duvri_documents set status = 'closed' where id = du;
+  begin
+    update duvri_documents set status = 'signed' where id = du;
+    raise exception 'T16: DUVRI chiuso riaperto';
+  exception when insufficient_privilege then null;
+  end;
+
+  -- firma prima dell'emissione: vietata
+  insert into duvri_documents (id, company_id, contractor_id, activity_description, no_interference)
+  values (du2, co, k, 'Consegna merci', true);
+  begin
+    insert into duvri_signatures (id, company_id, duvri_id, party, signer_name, signature_path, signature_sha256)
+    values (gen_random_uuid(), co, du2, 'employer', 'Anna', 'x', repeat('d', 64));
+    raise exception 'T16: firma prima dell''emissione';
+  exception when raise_exception then
+    if sqlerrm like 'T16:%' then raise; end if;
+  end;
+  perform set_config('t.duvri2', du2::text, true);
+end $$;
+
+-- operatore: legge, non scrive, non emette
+select pg_temp.login(current_setting('t.ub')::uuid);
+do $$ begin
+  assert (select count(*) from duvri_documents) >= 2, 'T16: l''operatore non legge i DUVRI';
+  begin
+    insert into contractors (company_id, name) values (current_setting('t.co1')::uuid, 'Abusivo');
+    raise exception 'T16: l''operatore ha creato un appaltatore';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform issue_duvri(current_setting('t.duvri2')::uuid);
+    raise exception 'T16: l''operatore ha emesso un DUVRI';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+-- altra azienda
+reset role; select pg_temp.login(current_setting('t.uc')::uuid);
+do $$ begin
+  assert (select count(*) from contractors) = 0, 'T16: C vede appaltatori altrui';
+  assert (select count(*) from duvri_documents) = 0, 'T16: C vede DUVRI altrui';
+  assert (select count(*) from duvri_signatures) = 0, 'T16: C vede firme altrui';
+  assert (select count(*) from v_contractor_compliance) = 0, 'T16: C vede la conformita'' altrui';
+  begin
+    perform issue_duvri(current_setting('t.duvri2')::uuid);
+    raise exception 'T16: C ha emesso un DUVRI altrui';
+  exception when insufficient_privilege or raise_exception then
+    if sqlerrm like 'T16:%' then raise; end if;
+  end;
+end $$;
+
+reset role;
+do $$ begin
+  assert exists (select 1 from storage.buckets where id = 'contractor-docs' and not public),
+    'T16: bucket contractor-docs mancante o pubblico';
+end $$;
+
 reset role;
 rollback;
 \echo 'TUTTI I TEST DATABASE SUPERATI'
