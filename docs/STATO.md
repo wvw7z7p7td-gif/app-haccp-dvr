@@ -18,4 +18,4 @@
 
 ## Per provarla
 1. Creare un progetto Supabase e applicare `supabase/migrations/*` (o `supabase db push`)
-2. `flutter run --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_PUBLISHABLE_KEY=...`
+2. `flutter run --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...`
