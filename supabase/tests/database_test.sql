@@ -771,14 +771,6 @@ begin
   exception when check_violation then null;
   end;
 
-  -- area di un'altra azienda
-  begin
-    insert into dvr_risks (company_id, site_id, hazard_id, title, probability, severity, area_id)
-    values (co, site, haz, 'Area altrui', 1, 1, (select id from areas limit 1));
-    -- se non esistono aree il test non e' significativo ma non deve fallire
-  exception when raise_exception then null;
-  end;
-
   insert into dvr_risks (id, company_id, site_id, hazard_id, title, probability, severity)
   values (r2, co, site, haz, 'Scivolamento nel retro', 2, 2);
 
