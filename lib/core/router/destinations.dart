@@ -37,11 +37,15 @@ const kDestinations = <AppDestination>[
     icon: Icons.cleaning_services_outlined, selectedIcon: Icons.cleaning_services, roles: _all,
   ),
   AppDestination(
-    path: '/sicurezza', branchIndex: 3, label: 'Sicurezza',
+    path: '/merci', branchIndex: 3, label: 'Merci',
+    icon: Icons.local_shipping_outlined, selectedIcon: Icons.local_shipping, roles: _all,
+  ),
+  AppDestination(
+    path: '/sicurezza', branchIndex: 4, label: 'Sicurezza',
     icon: Icons.health_and_safety_outlined, selectedIcon: Icons.health_and_safety, roles: _all,
   ),
   AppDestination(
-    path: '/report', branchIndex: 4, label: 'Report',
+    path: '/report', branchIndex: 5, label: 'Report',
     icon: Icons.description_outlined, selectedIcon: Icons.description,
     roles: {AppRole.admin, AppRole.consultant},
   ),

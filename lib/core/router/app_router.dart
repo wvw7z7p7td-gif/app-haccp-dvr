@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/login_page.dart';
 import '../../features/haccp/cleaning/cleaning_page.dart';
+import '../../features/haccp/receiving/receiving_page.dart';
 import '../../features/haccp/temperatures/temperature_page.dart';
 import '../../features/home/today_page.dart';
 import '../../features/reports/reports_page.dart';
@@ -51,6 +52,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/pulizie', builder: (_, __) => const CleaningPage()),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/merci', builder: (_, __) => const ReceivingPage()),
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/sicurezza', builder: (_, __) => const SafetyPage()),

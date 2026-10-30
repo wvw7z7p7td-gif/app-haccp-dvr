@@ -6,6 +6,7 @@ import '../../core/auth/providers.dart';
 import '../../shared/widgets/page_scaffold.dart';
 import '../haccp/cleaning/cleaning_models.dart';
 import '../haccp/cleaning/cleaning_providers.dart';
+import '../haccp/receiving/receiving_providers.dart';
 import '../haccp/temperatures/temperature_providers.dart';
 
 /// "Modalita' turno": riepilogo di cio' che e' da fare oggi.
@@ -18,6 +19,7 @@ class TodayPage extends ConsumerWidget {
     final today = DateFormat.yMMMMEEEEd('it_IT').format(DateTime.now());
     final temps = ref.watch(tempOverviewProvider);
     final cleaning = ref.watch(cleaningDataProvider);
+    final receiving = ref.watch(receivingDataProvider);
 
     final tempSubtitle = temps.when(
       loading: () => 'Caricamento…',
@@ -54,6 +56,22 @@ class TodayPage extends ConsumerWidget {
       orElse: () => false,
     );
 
+    final receivingSubtitle = receiving.when(
+      loading: () => 'Caricamento…',
+      error: (_, __) => 'Dati non disponibili',
+      data: (d) {
+        final today = d.receivedOn(DateTime.now());
+        if (today.isEmpty) return 'Nessuna consegna registrata oggi';
+        final issues = today.where((r) => r.hasIssues).length;
+        final base = '${today.length} consegn${today.length == 1 ? 'a' : 'e'} registrat${today.length == 1 ? 'a' : 'e'}';
+        return issues > 0 ? '$base · $issues con non conformita\'' : base;
+      },
+    );
+    final receivingAlert = receiving.maybeWhen(
+      data: (d) => d.receivedOn(DateTime.now()).any((r) => r.hasIssues),
+      orElse: () => false,
+    );
+
     return PageScaffold(
       title: m?.companyName ?? 'Oggi',
       body: ListView(
@@ -72,6 +90,12 @@ class TodayPage extends ConsumerWidget {
             title: 'Pulizie e sanificazione',
             subtitle: cleaningSubtitle,
             alert: cleaningAlert,
+          ),
+          _TaskCard(
+            icon: Icons.local_shipping,
+            title: 'Merci in arrivo / ricevute',
+            subtitle: receivingSubtitle,
+            alert: receivingAlert,
           ),
           const _TaskCard(
             icon: Icons.event_busy,
