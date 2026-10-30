@@ -25,10 +25,65 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      # Falliscono la build errori e warning; le segnalazioni "info"
-      # (es. API deprecate) restano visibili nel log senza bloccare.
+      # Falliscono la build errori e warning; le segnalazioni "info" restano
+      # visibili (anche come annotazione di riepilogo) senza bloccare.
       - name: Analyze
-        run: flutter analyze --no-fatal-infos
+        run: |
+          set +e
+          flutter analyze --no-fatal-infos 2>&1 | tee analyze.log
+          code=${PIPESTATUS[0]}
+          python3 .github/scripts/analyze_annotations.py analyze.log
+          exit $code
 
       - name: Test
-        run: flutter test
+        run: |
+          set +e
+          flutter test --reporter expanded 2>&1 | tee test.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            .github/scripts/annotate_log.sh error "flutter test fallito" test.log 80
+          fi
+          exit $code
+
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Genera supabase/config.toml se non e' nel repository.
+      - name: Init Supabase project files
+        run: |
+          [ -f supabase/config.toml ] || supabase init --force
+          ls supabase
+
+      # All'avvio applica tutte le migrazioni in supabase/migrations:
+      # un errore SQL fa fallire questo passo.
+      - name: Start local Supabase (applies migrations)
+        run: |
+          set +e
+          supabase start 2>&1 | tee start.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            .github/scripts/annotate_log.sh error "supabase start / migrazioni fallite" start.log 80
+          fi
+          exit $code
+
+      - name: Database tests
+        run: |
+          set +e
+          psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" \
+            -v ON_ERROR_STOP=1 -f supabase/tests/database_test.sql 2>&1 | tee db_test.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -eq 0 ]; then
+            .github/scripts/annotate_log.sh notice "test database superati" db_test.log 5
+          else
+            .github/scripts/annotate_log.sh error "test database falliti" db_test.log 40
+          fi
+          exit $code
