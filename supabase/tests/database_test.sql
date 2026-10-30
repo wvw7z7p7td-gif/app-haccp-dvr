@@ -566,6 +566,155 @@ do $$ begin
   end;
 end $$;
 
+-- ---------------------------------------------------------------------
+-- T14: controllo infestanti
+-- ---------------------------------------------------------------------
+reset role;
+select pg_temp.login(current_setting('t.ub')::uuid);
+do $$
+declare
+  co uuid := current_setting('t.co1')::uuid;
+  site uuid := current_setting('t.site1')::uuid;
+  st1 uuid := gen_random_uuid(); st2 uuid := gen_random_uuid();
+  in1 uuid := gen_random_uuid(); in2 uuid := gen_random_uuid(); in3 uuid := gen_random_uuid();
+  it1 uuid := gen_random_uuid(); it2 uuid := gen_random_uuid(); it_ok uuid := gen_random_uuid();
+  h1 text; ph2 text;
+begin
+  insert into pest_stations (id, company_id, site_id, code, kind, location)
+  values (st1, co, site, 'E1', 'rodent_bait', 'Retro cucina'),
+         (st2, co, site, 'L1', 'insect_light', 'Ingresso');
+  perform set_config('t.pst1', st1::text, true);
+
+  -- codice duplicato nella stessa sede
+  begin
+    insert into pest_stations (company_id, site_id, code, kind) values (co, site, 'e1', 'other');
+    raise exception 'T14: codice postazione duplicato accettato';
+  exception when unique_violation then null;
+  end;
+
+  -- postazione prima di qualsiasi controllo: in ritardo
+  assert (select overdue from v_pest_station_status where station_id = st1), 'T14: postazione mai controllata non in ritardo';
+
+  -- servizio esterno senza fornitore
+  begin
+    insert into pest_inspections (id, company_id, site_id, kind, inspected_at)
+    values (gen_random_uuid(), co, site, 'external_service', now());
+    raise exception 'T14: servizio esterno senza fornitore accettato';
+  exception when check_violation then null;
+  end;
+
+  insert into pest_inspections (id, company_id, site_id, inspected_at, employee_id)
+  values (in1, co, site, now(), current_setting('t.emp_b')::uuid);
+
+  -- rilievo non conforme senza note
+  begin
+    insert into pest_inspection_items (id, company_id, inspection_id, station_id, status)
+    values (gen_random_uuid(), co, in1, st1, 'activity');
+    raise exception 'T14: rilievo non conforme senza note accettato';
+  exception when check_violation then null;
+  end;
+
+  insert into pest_inspection_items (id, company_id, inspection_id, station_id, status, catch_count, notes)
+  values (it1, co, in1, st1, 'activity', 2, 'Esca consumata, 2 catture');
+  insert into pest_inspection_items (id, company_id, inspection_id, station_id, status)
+  values (it_ok, co, in1, st2, 'ok');
+
+  -- stessa postazione due volte nella stessa ispezione
+  begin
+    insert into pest_inspection_items (id, company_id, inspection_id, station_id, status)
+    values (gen_random_uuid(), co, in1, st2, 'ok');
+    raise exception 'T14: postazione duplicata nell''ispezione accettata';
+  exception when unique_violation then null;
+  end;
+
+  assert not (select overdue from v_pest_station_status where station_id = st1), 'T14: postazione appena controllata in ritardo';
+  assert (select last_status from v_pest_station_status where station_id = st1) = 'activity', 'T14: ultimo esito errato';
+  assert (select count(*) from v_open_pest_findings) = 1, 'T14: rilievo aperto non rilevato';
+
+  -- azione correttiva su postazione conforme: vietata
+  begin
+    insert into pest_corrective_actions (id, company_id, item_id, action, performed_at)
+    values (gen_random_uuid(), co, it_ok, 'Niente', now());
+    raise exception 'T14: azione correttiva su rilievo conforme accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T14:%' then raise; end if;
+  end;
+
+  insert into pest_corrective_actions (id, company_id, item_id, action, performed_at)
+  values (gen_random_uuid(), co, it1, 'Sostituita esca, chiamato il disinfestatore', now());
+  assert (select count(*) from v_open_pest_findings) = 0, 'T14: rilievo non chiuso dall''azione';
+
+  -- hash chain
+  insert into pest_inspections (id, company_id, site_id, inspected_at) values (in2, co, site, now());
+  select row_hash into h1 from pest_inspections where id = in1;
+  select prev_hash into ph2 from pest_inspections where id = in2;
+  assert h1 is not null and ph2 = h1, 'T14: hash chain ispezioni non collegata';
+end $$;
+
+-- postazione di un'altra sede/azienda
+reset role;
+do $$
+declare s2 uuid := gen_random_uuid(); st_other uuid := gen_random_uuid(); insp uuid := gen_random_uuid();
+begin
+  insert into sites (id, company_id, name) values (s2, current_setting('t.co1')::uuid, 'Seconda sede');
+  insert into pest_stations (id, company_id, site_id, code, kind)
+  values (st_other, current_setting('t.co1')::uuid, s2, 'X1', 'glue_trap');
+  insert into pest_inspections (id, company_id, site_id, inspected_at)
+  values (insp, current_setting('t.co1')::uuid, current_setting('t.site1')::uuid, now());
+  begin
+    insert into pest_inspection_items (id, company_id, inspection_id, station_id, status)
+    values (gen_random_uuid(), current_setting('t.co1')::uuid, insp, st_other, 'ok');
+    raise exception 'T14: postazione di un''altra sede accettata';
+  exception when raise_exception then
+    if sqlerrm like 'T14:%' then raise; end if;
+  end;
+end $$;
+
+-- consulente: legge, non scrive
+select pg_temp.login(current_setting('t.ud')::uuid);
+do $$ begin
+  assert (select count(*) from pest_inspections) >= 2, 'T14: il consulente non legge le ispezioni';
+  begin
+    insert into pest_stations (company_id, site_id, code, kind)
+    values (current_setting('t.co1')::uuid, current_setting('t.site1')::uuid, 'Z9', 'other');
+    raise exception 'T14: il consulente ha creato una postazione';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+
+-- operatore: non modifica le postazioni (solo admin)
+select pg_temp.login(current_setting('t.ub')::uuid);
+do $$ begin
+  update pest_stations set location = 'Spostata' where id = current_setting('t.pst1')::uuid;
+  assert (select location from pest_stations where id = current_setting('t.pst1')::uuid) = 'Retro cucina',
+    'T14: l''operatore ha modificato una postazione';
+end $$;
+
+-- altra azienda: isolamento
+reset role; select pg_temp.login(current_setting('t.uc')::uuid);
+do $$ begin
+  assert (select count(*) from pest_stations) = 0, 'T14: C vede postazioni altrui';
+  assert (select count(*) from pest_inspections) = 0, 'T14: C vede ispezioni altrui';
+  assert (select count(*) from v_pest_station_status) = 0, 'T14: C vede lo stato postazioni altrui';
+end $$;
+
+-- immutabilita'
+reset role;
+do $$ begin
+  begin
+    update pest_inspection_items set status = 'ok';
+    raise exception 'T14: update dei rilievi NON bloccato';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from pest_inspections;
+    raise exception 'T14: delete delle ispezioni NON bloccato';
+  exception when insufficient_privilege then null;
+  end;
+  assert exists (select 1 from storage.buckets where id = 'pest-reports' and not public),
+    'T14: bucket pest-reports mancante o pubblico';
+end $$;
+
 reset role;
 rollback;
 \echo 'TUTTI I TEST DATABASE SUPERATI'
