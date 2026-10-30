@@ -8,6 +8,7 @@ import '../../shared/widgets/page_scaffold.dart';
 import '../haccp/cleaning/cleaning_models.dart';
 import '../haccp/cleaning/cleaning_providers.dart';
 import '../haccp/menu/menu_providers.dart';
+import '../haccp/pest/pest_providers.dart';
 import '../haccp/receiving/receiving_providers.dart';
 import '../haccp/temperatures/temperature_providers.dart';
 
@@ -23,6 +24,7 @@ class TodayPage extends ConsumerWidget {
     final cleaning = ref.watch(cleaningDataProvider);
     final receiving = ref.watch(receivingDataProvider);
     final menu = ref.watch(menuDataProvider);
+    final pest = ref.watch(pestDataProvider);
 
     final tempSubtitle = temps.when(
       loading: () => 'Caricamento…',
@@ -88,6 +90,22 @@ class TodayPage extends ConsumerWidget {
     );
     final menuAlert = (menu.valueOrNull?.toReview ?? 0) > 0;
 
+    final pestSubtitle = pest.when(
+      loading: () => 'Caricamento…',
+      error: (_, __) => 'Dati non disponibili',
+      data: (d) {
+        if (d.stations.isEmpty) return 'Nessuna postazione configurata';
+        final late = d.overdueCount;
+        final open = d.openFindings.length;
+        return [
+          late > 0 ? '$late postazion${late == 1 ? 'e' : 'i'} da controllare' : 'controlli in regola',
+          if (open > 0) '$open rilievi senza azione',
+        ].join(' · ');
+      },
+    );
+    final pestAlert = (pest.valueOrNull?.overdueCount ?? 0) > 0 ||
+        (pest.valueOrNull?.openFindings.isNotEmpty ?? false);
+
     return PageScaffold(
       title: m?.companyName ?? 'Oggi',
       body: ListView(
@@ -119,6 +137,13 @@ class TodayPage extends ConsumerWidget {
             subtitle: menuSubtitle,
             alert: menuAlert,
             onTap: () => context.push('/menu'),
+          ),
+          _TaskCard(
+            icon: Icons.bug_report,
+            title: 'Controllo infestanti',
+            subtitle: pestSubtitle,
+            alert: pestAlert,
+            onTap: () => context.push('/infestanti'),
           ),
           const _TaskCard(
             icon: Icons.event_busy,
