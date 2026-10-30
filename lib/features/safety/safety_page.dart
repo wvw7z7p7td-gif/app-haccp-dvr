@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../shared/widgets/page_scaffold.dart';
 import 'duvri/duvri_providers.dart';
 import 'dvr/dvr_providers.dart';
+import 'people/people_providers.dart';
 
 class SafetyPage extends ConsumerWidget {
   const SafetyPage({super.key});
@@ -57,6 +58,24 @@ class SafetyPage extends ConsumerWidget {
           d.duvris.any((x) => x.needsClosing(today)),
       orElse: () => false,
     );
+    final people = ref.watch(peopleDataProvider);
+    final peopleInfo = people.when(
+      loading: () => 'Caricamento…',
+      error: (_, __) => 'Dati non disponibili',
+      data: (d) {
+        final issues = d.totalIssues(today);
+        final soon = d.deadlinesWithin(today, 30).length;
+        return [
+          '${d.employees.where((e) => e.active).length} persone',
+          if (issues > 0) '$issues requisiti non in regola',
+          if (soon > 0) '$soon scadenze entro 30 giorni',
+        ].join(' · ');
+      },
+    );
+    final peopleAlert = people.maybeWhen(
+      data: (d) => d.totalIssues(today) > 0 || d.deadlinesWithin(today, 30).isNotEmpty,
+      orElse: () => false,
+    );
     final cs = Theme.of(context).colorScheme;
     return PageScaffold(
       title: 'Sicurezza sul lavoro',
@@ -83,12 +102,15 @@ class SafetyPage extends ConsumerWidget {
             onTap: () => context.push('/duvri'),
           ),
         ),
-        const Card(
+        Card(
+          color: peopleAlert ? cs.errorContainer : null,
           child: ListTile(
             minVerticalPadding: 16,
-            leading: Icon(Icons.school_outlined, size: 32),
-            title: Text('Formazione, DPI e scadenze'),
-            subtitle: Text('In arrivo'),
+            leading: const Icon(Icons.school_outlined, size: 32),
+            title: const Text('Persone, formazione e DPI'),
+            subtitle: Text(peopleInfo),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/persone'),
           ),
         ),
       ]),
