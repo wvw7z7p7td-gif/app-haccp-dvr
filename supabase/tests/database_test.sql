@@ -1021,11 +1021,9 @@ begin
   assert (select signed_at from duvri_documents where id = du) is not null, 'T16: data firma mancante';
 
   -- le firme non si modificano
-  begin
-    update duvri_signatures set signer_name = 'Altro' where id = sg1;
-    raise exception 'T16: firma modificata';
-  exception when insufficient_privilege then null;
-  end;
+  -- senza policy di UPDATE la riga non e' visibile alla modifica: il valore deve restare
+  update duvri_signatures set signer_name = 'Altro' where id = sg1;
+  assert (select signer_name from duvri_signatures where id = sg1) = 'Anna Admin', 'T16: firma modificata';
 
   -- chiusura consentita, riapertura no
   update duvri_documents set status = 'closed' where id = du;
