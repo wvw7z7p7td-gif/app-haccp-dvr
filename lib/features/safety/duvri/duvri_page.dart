@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -460,7 +459,7 @@ class _DuvriDetail extends ConsumerWidget {
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('${x.contractorName}', style: t.textTheme.titleLarge),
+        Text(x.contractorName, style: t.textTheme.titleLarge),
         Text(x.activity),
         Text([
           x.stageLabel,

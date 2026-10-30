@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../shared/widgets/page_scaffold.dart';
-import 'duvri/duvri_models.dart';
 import 'duvri/duvri_providers.dart';
 import 'dvr/dvr_providers.dart';
 
