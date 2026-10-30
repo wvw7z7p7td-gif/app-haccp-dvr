@@ -6,6 +6,7 @@ import '../../features/auth/login_page.dart';
 import '../../features/haccp/cleaning/cleaning_page.dart';
 import '../../features/haccp/menu/menu_page.dart';
 import '../../features/haccp/pest/pest_page.dart';
+import '../../features/alerts/alerts_page.dart';
 import '../../features/safety/duvri/duvri_page.dart';
 import '../../features/safety/incidents/incident_page.dart';
 import '../../features/safety/people/people_page.dart';
@@ -45,6 +46,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginPage()),
+      GoRoute(path: '/avvisi', builder: (_, __) => const AlertsPage()),
       GoRoute(path: '/eventi', builder: (_, __) => const IncidentPage()),
       GoRoute(path: '/persone', builder: (_, __) => const PeoplePage()),
       GoRoute(path: '/duvri', builder: (_, __) => const DuvriPage()),

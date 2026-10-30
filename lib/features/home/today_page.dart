@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 
 import '../../core/auth/providers.dart';
 import '../../shared/widgets/page_scaffold.dart';
+import '../alerts/alert_models.dart';
+import '../alerts/alert_providers.dart';
 import '../haccp/cleaning/cleaning_models.dart';
 import '../haccp/cleaning/cleaning_providers.dart';
 import '../haccp/menu/menu_providers.dart';
@@ -25,6 +27,8 @@ class TodayPage extends ConsumerWidget {
     final receiving = ref.watch(receivingDataProvider);
     final menu = ref.watch(menuDataProvider);
     final pest = ref.watch(pestDataProvider);
+    final alerts = ref.watch(alertsProvider);
+    final critical = alerts.where((a) => a.severity == AlertSeverity.critical).length;
 
     final tempSubtitle = temps.when(
       loading: () => 'Caricamento…',
@@ -145,10 +149,15 @@ class TodayPage extends ConsumerWidget {
             alert: pestAlert,
             onTap: () => context.push('/infestanti'),
           ),
-          const _TaskCard(
-            icon: Icons.event_busy,
-            title: 'Scadenze imminenti',
-            subtitle: 'Disponibile con il modulo Formazione e DPI',
+          _TaskCard(
+            icon: Icons.notifications_active_outlined,
+            title: 'Avvisi e scadenze',
+            subtitle: alerts.isEmpty
+                ? 'Tutto in regola'
+                : '${alerts.length} avvis${alerts.length == 1 ? 'o' : 'i'}'
+                    '${critical > 0 ? ' · $critical urgent${critical == 1 ? 'e' : 'i'}' : ''}',
+            alert: critical > 0,
+            onTap: () => context.push('/avvisi'),
           ),
         ],
       ),
