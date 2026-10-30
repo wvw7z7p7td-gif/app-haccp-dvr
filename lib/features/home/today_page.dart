@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/auth/providers.dart';
 import '../../shared/widgets/page_scaffold.dart';
 import '../haccp/cleaning/cleaning_models.dart';
 import '../haccp/cleaning/cleaning_providers.dart';
+import '../haccp/menu/menu_providers.dart';
 import '../haccp/receiving/receiving_providers.dart';
 import '../haccp/temperatures/temperature_providers.dart';
 
@@ -20,6 +22,7 @@ class TodayPage extends ConsumerWidget {
     final temps = ref.watch(tempOverviewProvider);
     final cleaning = ref.watch(cleaningDataProvider);
     final receiving = ref.watch(receivingDataProvider);
+    final menu = ref.watch(menuDataProvider);
 
     final tempSubtitle = temps.when(
       loading: () => 'Caricamento…',
@@ -72,6 +75,19 @@ class TodayPage extends ConsumerWidget {
       orElse: () => false,
     );
 
+    final menuSubtitle = menu.when(
+      loading: () => 'Caricamento…',
+      error: (_, __) => 'Dati non disponibili',
+      data: (d) {
+        if (d.items.isEmpty) return 'Nessun piatto registrato';
+        final n = d.toReview;
+        return n > 0
+            ? '$n piatt${n == 1 ? 'o' : 'i'} con allergeni da verificare'
+            : '${d.items.length} piatti con allergeni verificati';
+      },
+    );
+    final menuAlert = (menu.valueOrNull?.toReview ?? 0) > 0;
+
     return PageScaffold(
       title: m?.companyName ?? 'Oggi',
       body: ListView(
@@ -97,6 +113,13 @@ class TodayPage extends ConsumerWidget {
             subtitle: receivingSubtitle,
             alert: receivingAlert,
           ),
+          _TaskCard(
+            icon: Icons.restaurant_menu,
+            title: 'Menu e allergeni',
+            subtitle: menuSubtitle,
+            alert: menuAlert,
+            onTap: () => context.push('/menu'),
+          ),
           const _TaskCard(
             icon: Icons.event_busy,
             title: 'Scadenze imminenti',
@@ -114,12 +137,14 @@ class _TaskCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     this.alert = false,
+    this.onTap,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final bool alert;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -131,6 +156,8 @@ class _TaskCard extends StatelessWidget {
         leading: Icon(icon, size: 32, color: alert ? cs.onErrorContainer : null),
         title: Text(title),
         subtitle: Text(subtitle),
+        trailing: onTap == null ? null : const Icon(Icons.chevron_right),
+        onTap: onTap,
       ),
     );
   }

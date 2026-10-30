@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/login_page.dart';
 import '../../features/haccp/cleaning/cleaning_page.dart';
+import '../../features/haccp/menu/menu_page.dart';
 import '../../features/haccp/receiving/receiving_page.dart';
 import '../../features/haccp/temperatures/temperature_page.dart';
 import '../../features/home/today_page.dart';
@@ -39,6 +40,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginPage()),
+      GoRoute(path: '/menu', builder: (_, __) => const MenuPage()),
       GoRoute(path: '/impostazioni', builder: (_, __) => const SettingsPage()),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>
