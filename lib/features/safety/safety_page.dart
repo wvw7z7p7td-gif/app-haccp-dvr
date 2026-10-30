@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../shared/widgets/page_scaffold.dart';
+import 'duvri/duvri_models.dart';
+import 'duvri/duvri_providers.dart';
 import 'dvr/dvr_providers.dart';
 
 class SafetyPage extends ConsumerWidget {
@@ -33,6 +35,29 @@ class SafetyPage extends ConsumerWidget {
           d.missingOfficers(today).isNotEmpty,
       orElse: () => false,
     );
+    final duvri = ref.watch(duvriDataProvider);
+    final duvriInfo = duvri.when(
+      loading: () => 'Caricamento…',
+      error: (_, __) => 'Dati non disponibili',
+      data: (d) {
+        final bad = d.nonCompliantContractors(today);
+        final soon = d.docsExpiringSoon(today);
+        final toClose = d.duvris.where((x) => x.needsClosing(today)).length;
+        return [
+          '${d.contractors.length} appaltatori',
+          if (bad > 0) '$bad con documenti da sistemare',
+          if (soon > 0) '$soon documenti in scadenza',
+          if (toClose > 0) '$toClose DUVRI da chiudere',
+        ].join(' · ');
+      },
+    );
+    final duvriAlert = duvri.maybeWhen(
+      data: (d) =>
+          d.nonCompliantContractors(today) > 0 ||
+          d.docsExpiringSoon(today) > 0 ||
+          d.duvris.any((x) => x.needsClosing(today)),
+      orElse: () => false,
+    );
     final cs = Theme.of(context).colorScheme;
     return PageScaffold(
       title: 'Sicurezza sul lavoro',
@@ -48,12 +73,15 @@ class SafetyPage extends ConsumerWidget {
             onTap: () => context.push('/dvr'),
           ),
         ),
-        const Card(
+        Card(
+          color: duvriAlert ? cs.errorContainer : null,
           child: ListTile(
             minVerticalPadding: 16,
-            leading: Icon(Icons.handshake_outlined, size: 32),
-            title: Text('DUVRI e imprese appaltatrici'),
-            subtitle: Text('In arrivo'),
+            leading: const Icon(Icons.handshake_outlined, size: 32),
+            title: const Text('DUVRI e imprese appaltatrici'),
+            subtitle: Text(duvriInfo),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/duvri'),
           ),
         ),
         const Card(
