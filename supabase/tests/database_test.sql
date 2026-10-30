@@ -15,6 +15,15 @@ begin
   set local role authenticated;
 end $$;
 
+-- Controllo: le asserzioni devono essere attive, altrimenti i test non provano nulla
+do $$ begin
+  begin
+    assert false, 'controllo';
+    raise exception 'SETUP: le asserzioni plpgsql sono disattivate';
+  exception when assert_failure then null;
+  end;
+end $$;
+
 -- ---------------------------------------------------------------------
 -- FIXTURE (come superuser, aggira la RLS)
 -- ---------------------------------------------------------------------

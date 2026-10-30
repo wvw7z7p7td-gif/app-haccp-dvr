@@ -198,7 +198,7 @@ class _PlanSheetState extends ConsumerState<_PlanSheet> {
           const SizedBox(height: 12),
           if (isNew) ...[
             DropdownButtonFormField<CleaningTemplate>(
-              value: null,
+              initialValue: null,
               decoration: const InputDecoration(
                 labelText: 'Parti da un modello (facoltativo)',
                 helperText: 'Modelli indicativi: adattali al tuo piano di autocontrollo.',
@@ -215,7 +215,8 @@ class _PlanSheetState extends ConsumerState<_PlanSheet> {
           TextField(controller: _name, decoration: const InputDecoration(labelText: 'Nome *')),
           const SizedBox(height: 12),
           DropdownButtonFormField<CleaningFrequency>(
-            value: _frequency,
+            key: ValueKey('frequency-$_frequency'),
+            initialValue: _frequency,
             decoration: const InputDecoration(labelText: 'Frequenza'),
             items: [
               for (final f in CleaningFrequency.values)
@@ -237,7 +238,8 @@ class _PlanSheetState extends ConsumerState<_PlanSheet> {
           if (_frequency == CleaningFrequency.monthly) ...[
             const SizedBox(height: 12),
             DropdownButtonFormField<int>(
-              value: _dayOfMonth,
+              key: ValueKey('dom-$_dayOfMonth'),
+              initialValue: _dayOfMonth,
               decoration: const InputDecoration(
                 labelText: 'Giorno del mese',
                 helperText: 'Se il mese e\' piu\' corto, cade l\'ultimo giorno.',
@@ -248,7 +250,8 @@ class _PlanSheetState extends ConsumerState<_PlanSheet> {
           ],
           const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
-            value: _shift,
+            key: ValueKey('shift-$_shift'),
+            initialValue: _shift,
             decoration: const InputDecoration(labelText: 'Momento della giornata'),
             items: [
               const DropdownMenuItem<String?>(value: null, child: Text('Non specificato')),
@@ -329,7 +332,7 @@ class _PlanSheetState extends ConsumerState<_PlanSheet> {
           ),
           if (isNew && sites.length > 1)
             DropdownButtonFormField<String>(
-              value: _siteId,
+              initialValue: _siteId,
               decoration: const InputDecoration(labelText: 'Sede'),
               items: [for (final s in sites) DropdownMenuItem(value: s.id, child: Text(s.name))],
               onChanged: (v) => setState(() => _siteId = v),

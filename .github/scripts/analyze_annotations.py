@@ -29,7 +29,7 @@ def main(path: str) -> None:
         if level in ("error", "warning"):
             print(f"::{level} file={file},line={line},col={col},title={rule}::{esc(msg)}")
 
-    summary = "\n".join(f"{lv}\t{file}:{line}:{col}\t{rule}\t{msg}"
+    summary = "\n".join(f"{lv}\t{file}:{line}\t{rule}\t{msg[:90]}"
                         for lv, msg, file, line, col, rule in items)
     title = f"flutter analyze: {counts['error']} errori, {counts['warning']} warning, {counts['info']} info"
     level = "error" if counts["error"] else ("warning" if counts["warning"] else "notice")

@@ -104,7 +104,7 @@ class _OperatorSelectorState extends ConsumerState<OperatorSelector> {
 
         return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           DropdownButtonFormField<EmployeeRef>(
-            value: sel.employee,
+            initialValue: sel.employee,
             decoration: InputDecoration(labelText: widget.label),
             items: [
               for (final e in list) DropdownMenuItem(value: e, child: Text(e.fullName)),

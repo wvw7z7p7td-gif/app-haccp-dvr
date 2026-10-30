@@ -92,7 +92,7 @@ class _ControlPointSheetState extends ConsumerState<_ControlPointSheet> {
     try {
       final repo = ref.read(temperatureRepoProvider)!;
       var siteId = widget.existing?.siteId ?? _siteId ?? (sites.isNotEmpty ? sites.first.id : null);
-      if (siteId == null) siteId = await ref.read(siteRepoProvider)!.createSite(_newSite.text);
+      siteId ??= await ref.read(siteRepoProvider)!.createSite(_newSite.text);
       await repo.saveControlPoint(
         id: widget.existing?.id,
         siteId: siteId,
@@ -152,7 +152,7 @@ class _ControlPointSheetState extends ConsumerState<_ControlPointSheet> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<ControlPointKind>(
-            value: _kind,
+            initialValue: _kind,
             decoration: const InputDecoration(labelText: 'Tipo'),
             items: [
               for (final k in ControlPointKind.values)
@@ -190,7 +190,7 @@ class _ControlPointSheetState extends ConsumerState<_ControlPointSheet> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<int>(
-            value: _perDay,
+            initialValue: _perDay,
             decoration: const InputDecoration(labelText: 'Rilevazioni al giorno'),
             items: [
               for (var i = 1; i <= 6; i++) DropdownMenuItem(value: i, child: Text('$i')),
@@ -200,7 +200,7 @@ class _ControlPointSheetState extends ConsumerState<_ControlPointSheet> {
           if (isNew && sites.length > 1) ...[
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: _siteId,
+              initialValue: _siteId,
               decoration: const InputDecoration(labelText: 'Sede'),
               items: [for (final s in sites) DropdownMenuItem(value: s.id, child: Text(s.name))],
               onChanged: (v) => setState(() => _siteId = v),

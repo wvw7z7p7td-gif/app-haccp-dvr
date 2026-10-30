@@ -31,14 +31,18 @@ class SettingsPage extends ConsumerWidget {
               padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Text('Azienda attiva'),
             ),
-            for (final m in memberships)
-              RadioListTile<String>(
-                value: m.companyId,
-                groupValue: active?.companyId,
-                title: Text(m.companyName),
-                subtitle: Text(m.role.label),
-                onChanged: (v) => ref.read(activeCompanyIdProvider.notifier).state = v,
-              ),
+            RadioGroup<String>(
+              groupValue: active?.companyId,
+              onChanged: (v) => ref.read(activeCompanyIdProvider.notifier).state = v,
+              child: Column(children: [
+                for (final m in memberships)
+                  RadioListTile<String>(
+                    value: m.companyId,
+                    title: Text(m.companyName),
+                    subtitle: Text(m.role.label),
+                  ),
+              ]),
+            ),
             const Divider(),
           ],
           ListTile(

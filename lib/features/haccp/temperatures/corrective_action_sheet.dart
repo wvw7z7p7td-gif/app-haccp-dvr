@@ -114,7 +114,7 @@ class _CorrectiveSheetState extends ConsumerState<_CorrectiveSheet> {
               '(limiti ${widget.point.rangeLabel})'),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
-            value: _cause,
+            initialValue: _cause,
             decoration: const InputDecoration(labelText: 'Causa probabile'),
             items: [for (final c in _causes) DropdownMenuItem(value: c, child: Text(c))],
             onChanged: (v) => setState(() => _cause = v),
@@ -128,7 +128,7 @@ class _CorrectiveSheetState extends ConsumerState<_CorrectiveSheet> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<ProductFate>(
-            value: _fate,
+            initialValue: _fate,
             decoration: const InputDecoration(labelText: 'Destino del prodotto'),
             items: [
               for (final f in ProductFate.values)
