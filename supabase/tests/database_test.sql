@@ -277,8 +277,8 @@ begin
 
   insert into ppe_types (id, company_id, name, replace_after_months)
   values (ppe, current_setting('t.co1')::uuid, 'Scarpe antinfortunistiche', 12);
-  insert into ppe_assignments (id, company_id, employee_id, ppe_type_id, delivered_on)
-  values (gen_random_uuid(), current_setting('t.co1')::uuid, current_setting('t.emp_b')::uuid, ppe, date '2026-02-01');
+  insert into ppe_assignments (id, company_id, employee_id, ppe_type_id, delivered_on, signature_path, signature_hash)
+  values (gen_random_uuid(), current_setting('t.co1')::uuid, current_setting('t.emp_b')::uuid, ppe, date '2026-02-01', 'sig', 'hash');
   select expires_on into exp2 from ppe_assignments where ppe_type_id = ppe;
   assert exp2 = date '2027-02-01', 'T9: scadenza DPI non calcolata';
 
