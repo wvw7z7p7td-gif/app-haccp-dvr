@@ -1,0 +1,69 @@
+name: Build Android (APK scaricabile)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Controlla i segreti
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          test -n "$SUPABASE_URL" || { echo "::error::Manca il segreto SUPABASE_URL"; exit 1; }
+          test -n "$SUPABASE_ANON_KEY" || { echo "::error::Manca il segreto SUPABASE_ANON_KEY"; exit 1; }
+
+      - name: Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Genera il progetto Android
+        run: flutter create --org it.tuaazienda --project-name haccp_safety --platforms=android .
+
+      - name: Permessi e nome dell'app
+        run: |
+          f=android/app/src/main/AndroidManifest.xml
+          # In release il permesso INTERNET non e' incluso di default.
+          sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application|' "$f"
+          sed -i 's|android:label="[^"]*"|android:label="HACCP e Sicurezza"|' "$f"
+          grep -n "INTERNET\|android:label" "$f"
+
+      - name: Dipendenze
+        run: flutter pub get
+
+      - name: Build APK
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          flutter build apk --release \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+          cp build/app/outputs/flutter-apk/app-release.apk haccp-sicurezza.apk
+          ls -la haccp-sicurezza.apk
+
+      - name: Pubblica come release scaricabile
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="apk-${{ github.run_number }}"
+          gh release create "$tag" haccp-sicurezza.apk \
+            --title "App HACCP e Sicurezza - build ${{ github.run_number }}" \
+            --notes "APK per Android. Da installare consentendo le app da fonti sconosciute."
