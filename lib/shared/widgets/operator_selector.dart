@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 import '../../core/auth/providers.dart';
 
@@ -155,6 +156,13 @@ Future<String?> verifyOperator(
         .read(supabaseProvider)
         .rpc('verify_employee_pin', params: {'p_employee': e.id, 'p_pin': s.pin});
     return ok == true ? null : 'PIN non corretto (o non ancora impostato).';
+  } on PostgrestException catch (ex) {
+    final m = RegExp(r'PIN_LOCKED:(\d+)').firstMatch(ex.message);
+    if (m != null) {
+      return 'Troppi tentativi errati: riprova tra ${m.group(1)} minuti '
+          '(oppure l\'amministratore reimposta il PIN).';
+    }
+    return 'Impossibile verificare il PIN.';
   } catch (_) {
     return 'Impossibile verificare il PIN: controlla la connessione.';
   }

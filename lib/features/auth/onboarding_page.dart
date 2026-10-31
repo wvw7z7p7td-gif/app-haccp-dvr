@@ -23,6 +23,29 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
     super.dispose();
   }
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkInvites(silent: true));
+  }
+
+  /// Se un amministratore ti ha invitato con questa email, entri nella sua azienda.
+  Future<void> _checkInvites({bool silent = false}) async {
+    setState(() => _busy = true);
+    try {
+      final n = await ref.read(supabaseProvider).rpc('accept_invites');
+      if (n is int && n > 0) {
+        ref.invalidate(membershipsProvider);
+        return;
+      }
+      if (!silent && mounted) setState(() => _error = 'Nessun invito trovato per questa email.');
+    } catch (_) {
+      if (!silent && mounted) setState(() => _error = 'Controllo non riuscito. Riprova.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _create() async {
     if (_name.text.trim().length < 2) {
       setState(() => _error = 'Inserisci il nome dell\'attivita\'.');
@@ -38,8 +61,11 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
         'p_vat': _vat.text.trim().isEmpty ? null : _vat.text.trim(),
       });
       ref.invalidate(membershipsProvider);
-    } catch (_) {
-      setState(() => _error = 'Non e\' stato possibile creare l\'azienda. Riprova.');
+    } catch (e) {
+      setState(() => _error = e.toString().contains('NOT_ALLOWED')
+          ? 'Questo account non puo\' creare una nuova attivita\'. '
+              'Se lavori in un\'attivita\' esistente, chiedi all\'amministratore di invitarti con questa email.'
+          : 'Non e\' stato possibile creare l\'azienda. Riprova.');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -87,6 +113,11 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                 FilledButton(
                   onPressed: _busy ? null : _create,
                   child: const Text('Crea e inizia'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: _busy ? null : _checkInvites,
+                  child: const Text('Sono stato invitato: controlla inviti'),
                 ),
               ]),
             ),
