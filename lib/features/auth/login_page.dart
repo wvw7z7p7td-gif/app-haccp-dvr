@@ -16,7 +16,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   bool _busy = false;
+  bool _signUp = false;
   String? _error;
+  String? _info;
 
   @override
   void dispose() {
@@ -32,10 +34,19 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       _error = null;
     });
     try {
-      await ref.read(supabaseProvider).auth.signInWithPassword(
-            email: _email.text.trim(),
-            password: _password.text,
-          );
+      final auth = ref.read(supabaseProvider).auth;
+      if (_signUp) {
+        final r = await auth.signUp(email: _email.text.trim(), password: _password.text);
+        if (r.session == null) {
+          // Conferma email attiva sul progetto: l'accesso avviene dopo il clic sul link.
+          setState(() {
+            _info = 'Ti abbiamo inviato un\'email: conferma l\'indirizzo, poi accedi.';
+            _signUp = false;
+          });
+        }
+      } else {
+        await auth.signInWithPassword(email: _email.text.trim(), password: _password.text);
+      }
       // La navigazione e' gestita dal redirect del router.
     } on AuthException catch (e) {
       setState(() => _error = e.message);
@@ -80,9 +91,15 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       obscureText: true,
                       autofillHints: const [AutofillHints.password],
                       decoration: const InputDecoration(labelText: 'Password'),
-                      validator: (v) => (v == null || v.isEmpty) ? 'Inserisci la password' : null,
+                      validator: (v) => (v == null || v.length < (_signUp ? 8 : 1))
+                          ? (_signUp ? 'Almeno 8 caratteri' : 'Inserisci la password')
+                          : null,
                       onFieldSubmitted: (_) => _submit(),
                     ),
+                    if (_info != null) ...[
+                      const SizedBox(height: 12),
+                      Text(_info!, style: TextStyle(color: t.colorScheme.primary)),
+                    ],
                     if (_error != null) ...[
                       const SizedBox(height: 12),
                       Text(_error!, style: TextStyle(color: t.colorScheme.error)),
@@ -93,7 +110,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       child: _busy
                           ? const SizedBox(
                               height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Text('Accedi'),
+                          : Text(_signUp ? 'Crea account' : 'Accedi'),
+                    ),
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () => setState(() {
+                                _signUp = !_signUp;
+                                _error = null;
+                                _info = null;
+                              }),
+                      child: Text(_signUp ? 'Ho gia\' un account: accedi' : 'Prima volta? Crea un account'),
                     ),
                   ],
                 ),

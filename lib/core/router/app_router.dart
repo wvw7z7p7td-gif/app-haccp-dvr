@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/login_page.dart';
+import '../../features/auth/onboarding_page.dart';
 import '../../features/haccp/cleaning/cleaning_page.dart';
 import '../../features/haccp/menu/menu_page.dart';
 import '../../features/haccp/pest/pest_page.dart';
@@ -25,6 +26,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   final refresh = ValueNotifier<int>(0);
   ref.listen(sessionProvider, (_, __) => refresh.value++);
   ref.listen(activeMembershipProvider, (_, __) => refresh.value++);
+  ref.listen(membershipsProvider, (_, __) => refresh.value++);
   ref.onDispose(refresh.dispose);
 
   return GoRouter(
@@ -36,6 +38,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (!loggedIn) return atLogin ? null : '/login';
       if (atLogin) return '/oggi';
 
+      // Nessuna azienda: primo accesso, si crea la propria attivita'.
+      final memberships = ref.read(membershipsProvider);
+      final atOnboarding = state.matchedLocation == '/azienda';
+      if (memberships.hasValue) {
+        final empty = memberships.value!.isEmpty;
+        if (empty && !atOnboarding) return '/azienda';
+        if (!empty && atOnboarding) return '/oggi';
+      }
+
       // Guardia di ruolo (la sicurezza vera resta nelle policy RLS del DB).
       final membership = ref.read(activeMembershipProvider);
       final dest = destinationForPath(state.matchedLocation);
@@ -46,6 +57,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginPage()),
+      GoRoute(path: '/azienda', builder: (_, __) => const OnboardingPage()),
       GoRoute(path: '/avvisi', builder: (_, __) => const AlertsPage()),
       GoRoute(path: '/eventi', builder: (_, __) => const IncidentPage()),
       GoRoute(path: '/persone', builder: (_, __) => const PeoplePage()),
