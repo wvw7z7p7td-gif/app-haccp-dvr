@@ -124,18 +124,21 @@ class TodayPage extends ConsumerWidget {
             title: 'Rilevazioni temperatura',
             subtitle: tempSubtitle,
             alert: tempAlert,
+            onTap: () => context.go('/temperature'),
           ),
           _TaskCard(
             icon: Icons.cleaning_services,
             title: 'Pulizie e sanificazione',
             subtitle: cleaningSubtitle,
             alert: cleaningAlert,
+            onTap: () => context.go('/pulizie'),
           ),
           _TaskCard(
             icon: Icons.local_shipping,
             title: 'Merci in arrivo / ricevute',
             subtitle: receivingSubtitle,
             alert: receivingAlert,
+            onTap: () => context.go('/merci'),
           ),
           _TaskCard(
             icon: Icons.restaurant_menu,
