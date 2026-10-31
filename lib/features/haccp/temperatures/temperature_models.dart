@@ -26,6 +26,14 @@ enum ControlPointKind {
   final String label;
   final IconData icon;
 
+  /// Intestazione di sezione nell'elenco.
+  String get sectionLabel => switch (this) {
+        fridge || freezer || blastChiller => 'Unita\' di raffreddamento',
+        display => 'Vetrine espositive',
+        hotHolding => 'Mantenimento a caldo',
+        other => 'Altri punti di controllo',
+      };
+
   static ControlPointKind fromDb(String v) =>
       values.firstWhere((k) => k.dbValue == v, orElse: () => other);
 }

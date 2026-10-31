@@ -27,11 +27,20 @@ class App extends ConsumerWidget {
   }
 
   ThemeData _theme(Brightness brightness) {
+    final light = brightness == Brightness.light;
     return ThemeData(
       useMaterial3: true,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFF0F766E),
+        seedColor: const Color(0xFF4F46E5), // indaco, come nel design
         brightness: brightness,
+      ),
+      // Sfondo grigio-azzurro chiaro con card bianche arrotondate.
+      scaffoldBackgroundColor: light ? const Color(0xFFF1F5F9) : null,
+      cardTheme: CardThemeData(
+        elevation: 1.5,
+        shadowColor: Colors.black26,
+        color: light ? Colors.white : null,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),
       // Target di tocco ampi: si usa anche con i guanti.
       materialTapTargetSize: MaterialTapTargetSize.padded,

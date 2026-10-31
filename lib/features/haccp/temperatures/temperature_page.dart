@@ -42,11 +42,18 @@ class TemperaturePage extends ConsumerWidget {
         ),
         data: (o) => Column(
           children: [
-            _SummaryBar(overview: o),
-            const Divider(height: 1),
+            _Header(overview: o),
             Expanded(
               child: MasterDetail<ControlPoint>(
-                items: o.points,
+                items: ([...o.points]..sort((a, b) => a.kind.index.compareTo(b.kind.index))),
+                sectionOf: (p) => p.kind.sectionLabel,
+                itemBuilder: (ctx, p, selected, open) => _PointCard(
+                  point: p,
+                  overview: o,
+                  selected: selected,
+                  canWrite: role?.canWrite ?? false,
+                  onOpen: open,
+                ),
                 emptyLabel: role?.isAdmin == true
                     ? 'Nessun punto di controllo.\nCreane uno con il pulsante in basso.'
                     : 'Nessun punto di controllo configurato.',
@@ -81,28 +88,41 @@ class TemperaturePage extends ConsumerWidget {
   }
 }
 
-class _SummaryBar extends ConsumerWidget {
-  const _SummaryBar({required this.overview});
+class _Header extends ConsumerWidget {
+  const _Header({required this.overview});
   final TempOverview overview;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
     final open = overview.totalOpenDeviations;
+    final date = DateFormat("EEEE, d MMMM y", 'it_IT').format(DateTime.now());
     return Container(
-      color: open > 0 ? cs.errorContainer : null,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      width: double.infinity,
+      color: cs.surface,
+      padding: const EdgeInsets.fromLTRB(24, 16, 12, 16),
       child: Row(children: [
-        Icon(open > 0 ? Icons.warning_amber : Icons.check_circle_outline,
-            color: open > 0 ? cs.onErrorContainer : cs.primary),
-        const SizedBox(width: 8),
         Expanded(
-          child: Text(
-            open > 0
-                ? '$open scostament${open == 1 ? 'o' : 'i'} senza azione correttiva'
-                : 'Oggi: ${overview.doneToday}/${overview.expectedToday} rilevazioni',
-            style: TextStyle(color: open > 0 ? cs.onErrorContainer : null),
-          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Registro Temperature HACCP',
+                style: t.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 4),
+            Row(children: [
+              Icon(Icons.calendar_today_outlined, size: 14, color: cs.onSurfaceVariant),
+              const SizedBox(width: 6),
+              Text(toBeginningOfSentenceCase(date) ?? date,
+                  style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+            ]),
+            const SizedBox(height: 6),
+            Text(
+              open > 0
+                  ? '$open scostament${open == 1 ? 'o' : 'i'} senza azione correttiva'
+                  : 'Oggi: ${overview.doneToday}/${overview.expectedToday} rilevazioni',
+              style: t.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600, color: open > 0 ? cs.error : cs.primary),
+            ),
+          ]),
         ),
         IconButton(
           tooltip: 'Aggiorna',
@@ -110,6 +130,95 @@ class _SummaryBar extends ConsumerWidget {
           onPressed: () => ref.invalidate(tempOverviewProvider),
         ),
       ]),
+    );
+  }
+}
+
+class _PointCard extends ConsumerWidget {
+  const _PointCard({
+    required this.point,
+    required this.overview,
+    required this.selected,
+    required this.canWrite,
+    required this.onOpen,
+  });
+  final ControlPoint point;
+  final TempOverview overview;
+  final bool selected;
+  final bool canWrite;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final done = overview.todayCount[point.id] ?? 0;
+    final last = overview.lastToday[point.id];
+    final open = overview.openDeviations[point.id] ?? 0;
+    final alert = open > 0 || (last?.outOfRange ?? false);
+    final fmt = DateFormat('HH:mm', 'it_IT');
+
+    Future<void> record() async {
+      final r = await showReadingSheet(context, point);
+      if (r == null || !r.outOfRange || !context.mounted) return;
+      await showCorrectiveActionSheet(context, point: point, reading: r);
+    }
+
+    return Material(
+      color: cs.surface,
+      elevation: 1.5,
+      shadowColor: Colors.black26,
+      borderRadius: BorderRadius.circular(24),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: onOpen,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(20, 16, 8, 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: selected ? cs.primary : (alert ? cs.error : Colors.transparent),
+              width: selected || alert ? 2 : 0,
+            ),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(
+                child: Text(point.name,
+                    style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+              ),
+              if (canWrite)
+                IconButton(
+                  tooltip: 'Registra temperatura',
+                  icon: const Icon(Icons.edit_note, size: 28),
+                  onPressed: record,
+                ),
+            ]),
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Row(children: [
+                Text(
+                  last == null ? '--' : formatTemp(last.valueC),
+                  style: t.textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800, color: alert ? cs.error : cs.onSurface),
+                ),
+                const Spacer(),
+                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Text('$done/${point.readingsPerDay} oggi', style: t.textTheme.bodyMedium),
+                  if (last != null)
+                    Text('alle ${fmt.format(last.measuredAt.toLocal())}',
+                        style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+                  if (open > 0)
+                    Text('$open da gestire',
+                        style: t.textTheme.bodySmall
+                            ?.copyWith(color: cs.error, fontWeight: FontWeight.w700)),
+                ]),
+              ]),
+            ),
+          ]),
+        ),
+      ),
     );
   }
 }
