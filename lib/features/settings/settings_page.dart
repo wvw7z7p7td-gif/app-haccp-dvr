@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/auth/providers.dart';
-import '../../core/models/app_role.dart';
 import 'invites_section.dart';
 
 class SettingsPage extends ConsumerWidget {
