@@ -12,6 +12,10 @@ import 'temp_chart.dart';
 import 'temperature_models.dart';
 import 'temperature_providers.dart';
 
+/// "2/3 oggi"; se ne sono state fatte piu' del previsto: "4 oggi (3 previste)".
+String todayLabel(int done, int planned) =>
+    done > planned ? '$done oggi ($planned previste)' : '$done/$planned oggi';
+
 class TemperaturePage extends ConsumerWidget {
   const TemperaturePage({super.key});
 
@@ -80,7 +84,7 @@ class TemperaturePage extends ConsumerWidget {
     final last = o.lastToday[p.id];
     final open = o.openDeviations[p.id] ?? 0;
     final parts = <String>[
-      '$done/${p.readingsPerDay} oggi',
+      todayLabel(done, p.readingsPerDay),
       if (last != null) 'ultima ${formatTemp(last.valueC)}',
       if (open > 0) '$open scostament${open == 1 ? 'o' : 'i'} da gestire',
     ];
@@ -211,7 +215,7 @@ class _PointCard extends ConsumerWidget {
                 ),
                 const Spacer(),
                 Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text('$done/${point.readingsPerDay} oggi', style: t.textTheme.bodyMedium),
+                  Text(todayLabel(done, point.readingsPerDay), style: t.textTheme.bodyMedium),
                   if (last != null)
                     Text('alle ${fmt.format(last.measuredAt.toLocal())}',
                         style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
@@ -267,7 +271,7 @@ class ControlPointDetail extends ConsumerWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(point.name, style: t.textTheme.titleLarge),
               Text('${point.kind.label} · limiti ${point.rangeLabel}'),
-              Text('Oggi: $done/${point.readingsPerDay} rilevazioni'),
+              Text('Oggi: ${todayLabel(done, point.readingsPerDay)}'),
             ]),
           ),
         ]),
