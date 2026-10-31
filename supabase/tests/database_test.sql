@@ -1432,6 +1432,109 @@ do $$ begin
   assert exists (select 1 from storage.buckets where id = 'temp-photos' and not public), 'T19: bucket mancante o pubblico';
 end $$;
 
+-- =====================================================================
+-- T20 - Blocco PIN, inviti, creazione azienda riservata
+-- =====================================================================
+reset role; select pg_temp.login(current_setting('t.ua')::uuid);
+select set_employee_pin(current_setting('t.emp_a')::uuid, '4321');
+
+reset role; select pg_temp.login(current_setting('t.ub')::uuid);
+do $$
+declare i int;
+begin
+  for i in 1..5 loop
+    assert not verify_employee_pin(current_setting('t.emp_a')::uuid, '0000'), 'T20: PIN errato accettato';
+  end loop;
+  begin
+    perform verify_employee_pin(current_setting('t.emp_a')::uuid, '4321');
+    raise exception 'T20: nessun blocco dopo 5 errori';
+  exception when others then
+    if sqlerrm not like 'PIN_LOCKED:%' then raise; end if;
+  end;
+end $$;
+
+reset role;
+do $$ begin
+  assert (select failed from employee_pin_attempts where employee_id = current_setting('t.emp_a')::uuid) >= 5,
+    'T20: tentativi non registrati';
+  update employee_pin_attempts set locked_until = now() - interval '1 minute'
+   where employee_id = current_setting('t.emp_a')::uuid;
+end $$;
+select pg_temp.login(current_setting('t.ub')::uuid);
+do $$ begin
+  assert verify_employee_pin(current_setting('t.emp_a')::uuid, '4321'), 'T20: PIN corretto rifiutato a blocco scaduto';
+end $$;
+reset role;
+do $$ begin
+  assert not exists (select 1 from employee_pin_attempts where employee_id = current_setting('t.emp_a')::uuid),
+    'T20: contatore non azzerato';
+end $$;
+
+-- inviti
+do $$
+declare ue uuid := gen_random_uuid(); uf uuid := gen_random_uuid();
+begin
+  insert into auth.users (id, email, email_confirmed_at) values (ue, 'new@test.local', now());
+  insert into auth.users (id, email) values (uf, 'unc@test.local');
+  perform set_config('t.ue', ue::text, true);
+  perform set_config('t.uf', uf::text, true);
+end $$;
+
+select pg_temp.login(current_setting('t.ua')::uuid);
+insert into company_invites (company_id, email, role) values
+  (current_setting('t.co1')::uuid, 'new@test.local', 'employee'),
+  (current_setting('t.co1')::uuid, 'unc@test.local', 'employee');
+
+reset role; select pg_temp.login(current_setting('t.ub')::uuid);
+do $$ begin
+  begin
+    insert into company_invites (company_id, email, role)
+    values (current_setting('t.co1')::uuid, 'x@test.local', 'employee');
+    raise exception 'T20: invito creato da un operatore';
+  exception when insufficient_privilege then null;
+  end;
+  assert (select count(*) from company_invites) = 0, 'T20: l''operatore vede gli inviti';
+end $$;
+
+reset role; select pg_temp.login(current_setting('t.uc')::uuid);
+do $$ begin
+  assert (select count(*) from company_invites) = 0, 'T20: un''altra azienda vede gli inviti';
+end $$;
+
+reset role; select pg_temp.login(current_setting('t.ue')::uuid);
+do $$ begin
+  assert accept_invites() = 1, 'T20: invito non accettato';
+  assert is_member(current_setting('t.co1')::uuid), 'T20: invitato non membro';
+  assert accept_invites() = 0, 'T20: invito accettato due volte';
+end $$;
+
+reset role; select pg_temp.login(current_setting('t.uf')::uuid);
+do $$ begin
+  assert accept_invites() = 0, 'T20: invito accettato con email non confermata';
+  assert not is_member(current_setting('t.co1')::uuid), 'T20: email non confermata e'' entrata';
+end $$;
+
+-- creazione azienda riservata
+reset role; select pg_temp.login(current_setting('t.uc')::uuid);
+do $$ begin
+  begin
+    perform create_company('Abusiva');
+    raise exception 'T20: creazione azienda non autorizzata';
+  exception when others then
+    if sqlerrm not like 'NOT_ALLOWED%' then raise; end if;
+  end;
+end $$;
+reset role;
+insert into company_creators (email) values ('c@test.local');
+select pg_temp.login(current_setting('t.uc')::uuid);
+do $$
+declare v uuid;
+begin
+  v := create_company('Nuova');
+  assert exists (select 1 from sites where company_id = v and name = 'Sede principale'),
+    'T20: sede principale mancante';
+end $$;
+
 reset role;
 rollback;
 \echo 'TUTTI I TEST DATABASE SUPERATI'
