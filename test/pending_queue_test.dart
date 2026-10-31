@@ -8,6 +8,7 @@ PendingOp _op(String id) =>
     PendingOp(table: 't', payload: {'id': id}, queuedAt: DateTime(2026, 10, 31));
 
 void main() {
+  photoTests();
   test('persistenza e ordine FIFO', () async {
     final s = MemoryStore();
     final q = PendingQueue(s, 'k');
@@ -56,5 +57,31 @@ void main() {
   test('dati corrotti: coda vuota, nessuna eccezione', () async {
     final s = MemoryStore()..data['k'] = '{non json';
     expect(await PendingQueue(s, 'k').count(), 0);
+  });
+}
+
+void photoTests() {
+  test('la foto in coda sopravvive alla serializzazione', () async {
+    final s = MemoryStore();
+    final q = PendingQueue(s, 'k');
+    await q.add(PendingOp(
+      table: 't',
+      payload: {'id': '1'},
+      queuedAt: DateTime(2026, 10, 31),
+      uploadBucket: 'temp-photos',
+      uploadPath: 'c/temp/1.jpg',
+      uploadB64: 'AAEC',
+    ));
+    late PendingOp got;
+    await PendingQueue(s, 'k').flush((o) async => got = o);
+    expect(got.uploadB64, 'AAEC');
+    expect(got.uploadBucket, 'temp-photos');
+    expect(got.uploadPath, 'c/temp/1.jpg');
+  });
+
+  test('errore 4xx di storage e\' permanente, 5xx e 429 no', () {
+    expect(isPermanentRejection(const StorageException('x', statusCode: '403')), isTrue);
+    expect(isPermanentRejection(const StorageException('x', statusCode: '503')), isFalse);
+    expect(isPermanentRejection(const StorageException('x', statusCode: '429')), isFalse);
   });
 }

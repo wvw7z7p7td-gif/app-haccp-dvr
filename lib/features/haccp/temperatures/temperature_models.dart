@@ -104,6 +104,7 @@ class TempReading {
     required this.outOfRange,
     this.employeeId,
     this.notes,
+    this.photoPath,
   });
 
   final String id;
@@ -113,6 +114,7 @@ class TempReading {
   final bool outOfRange;
   final String? employeeId;
   final String? notes;
+  final String? photoPath;
 
   factory TempReading.fromMap(Map<String, dynamic> m) => TempReading(
         id: m['id'] as String,
@@ -122,6 +124,7 @@ class TempReading {
         outOfRange: (m['out_of_range'] as bool?) ?? false,
         employeeId: m['employee_id'] as String?,
         notes: m['notes'] as String?,
+        photoPath: m['photo_path'] as String?,
       );
 }
 

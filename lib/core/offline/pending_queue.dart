@@ -6,18 +6,39 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Operazione di scrittura in attesa di essere inviata (insert idempotente: l'id e' del client).
 class PendingOp {
-  const PendingOp({required this.table, required this.payload, required this.queuedAt});
+  const PendingOp({
+    required this.table,
+    required this.payload,
+    required this.queuedAt,
+    this.uploadBucket,
+    this.uploadPath,
+    this.uploadB64,
+  });
   final String table;
   final Map<String, dynamic> payload;
   final DateTime queuedAt;
 
-  Map<String, dynamic> toJson() =>
-      {'table': table, 'payload': payload, 'queuedAt': queuedAt.toIso8601String()};
+  /// File da caricare PRIMA dell'insert (es. foto a testimonianza), in base64.
+  final String? uploadBucket;
+  final String? uploadPath;
+  final String? uploadB64;
+
+  Map<String, dynamic> toJson() => {
+        'table': table,
+        'payload': payload,
+        'queuedAt': queuedAt.toIso8601String(),
+        if (uploadB64 != null) 'uploadBucket': uploadBucket,
+        if (uploadB64 != null) 'uploadPath': uploadPath,
+        if (uploadB64 != null) 'uploadB64': uploadB64,
+      };
 
   factory PendingOp.fromJson(Map<String, dynamic> m) => PendingOp(
         table: m['table'] as String,
         payload: Map<String, dynamic>.from(m['payload'] as Map),
         queuedAt: DateTime.parse(m['queuedAt'] as String),
+        uploadBucket: m['uploadBucket'] as String?,
+        uploadPath: m['uploadPath'] as String?,
+        uploadB64: m['uploadB64'] as String?,
       );
 }
 
@@ -47,7 +68,14 @@ typedef OpSender = Future<void> Function(PendingOp op);
 
 /// Un errore e' "rifiutato dal server" (non ritentabile) solo se e' una PostgrestException
 /// diversa da duplicato (23505, gia' registrata = successo). Tutto il resto e' rete.
-bool isPermanentRejection(Object e) => e is PostgrestException && e.code != '23505';
+bool isPermanentRejection(Object e) {
+  if (e is PostgrestException) return e.code != '23505';
+  if (e is StorageException) {
+    final c = int.tryParse(e.statusCode ?? '');
+    return c != null && c >= 400 && c < 500 && c != 408 && c != 429;
+  }
+  return false;
+}
 bool isAlreadyStored(Object e) => e is PostgrestException && e.code == '23505';
 
 class FlushResult {

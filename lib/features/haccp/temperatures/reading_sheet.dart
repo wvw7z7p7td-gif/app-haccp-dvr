@@ -1,6 +1,11 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/auth/providers.dart';
@@ -9,22 +14,25 @@ import '../../../core/offline/offline_providers.dart';
 import '../../../core/offline/pending_queue.dart';
 import '../../../shared/widgets/operator_selector.dart';
 import 'temperature_models.dart';
+import 'temperature_repository.dart' show tempPhotoBucket, tempPhotoPath;
 import 'temperature_providers.dart';
 
 /// Restituisce la rilevazione salvata, o null se annullata.
-Future<TempReading?> showReadingSheet(BuildContext context, ControlPoint point) {
+Future<TempReading?> showReadingSheet(BuildContext context, ControlPoint point,
+    {bool startWithPhoto = false}) {
   return showModalBottomSheet<TempReading>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
-    builder: (_) => _ReadingSheet(point: point),
+    builder: (_) => _ReadingSheet(point: point, startWithPhoto: startWithPhoto),
   );
 }
 
 class _ReadingSheet extends ConsumerStatefulWidget {
-  const _ReadingSheet({required this.point});
+  const _ReadingSheet({required this.point, this.startWithPhoto = false});
   final ControlPoint point;
+  final bool startWithPhoto;
 
   @override
   ConsumerState<_ReadingSheet> createState() => _ReadingSheetState();
@@ -39,6 +47,27 @@ class _ReadingSheetState extends ConsumerState<_ReadingSheet> {
   late final DateTime _measuredAt = DateTime.now();
   bool _busy = false;
   String? _error;
+  Uint8List? _photo;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.startWithPhoto) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _takePhoto());
+    }
+  }
+
+  Future<void> _takePhoto() async {
+    try {
+      final f = await ImagePicker()
+          .pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 75);
+      if (f == null) return;
+      final bytes = await f.readAsBytes();
+      if (mounted) setState(() => _photo = bytes);
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Fotocamera non disponibile.');
+    }
+  }
 
   @override
   void dispose() {
@@ -78,6 +107,7 @@ class _ReadingSheetState extends ConsumerState<_ReadingSheet> {
         measuredAt: _measuredAt,
         employeeId: _op.employee?.id,
         notes: _notes.text,
+        photo: _photo,
       );
       ref.invalidate(tempOverviewProvider);
       ref.invalidate(tempHistoryProvider(widget.point.id));
@@ -115,7 +145,12 @@ class _ReadingSheetState extends ConsumerState<_ReadingSheet> {
         'employee_id': _op.employee?.id,
         'source': 'manual',
         'notes': notes.isEmpty ? null : notes,
+        if (_photo != null) 'photo_path': tempPhotoPath(m.companyId, _id),
+        if (_photo != null) 'photo_hash': sha256.convert(_photo!).toString(),
       },
+      uploadBucket: _photo == null ? null : tempPhotoBucket,
+      uploadPath: _photo == null ? null : tempPhotoPath(m.companyId, _id),
+      uploadB64: _photo == null ? null : base64Encode(_photo!),
     ));
     await ref.read(pendingCountProvider.notifier).refreshCount();
     if (!mounted) return;
@@ -191,6 +226,27 @@ class _ReadingSheetState extends ConsumerState<_ReadingSheet> {
             controller: _notes,
             decoration: const InputDecoration(labelText: 'Note (facoltative)'),
           ),
+          const SizedBox(height: 12),
+          if (_photo != null)
+            Row(children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.memory(_photo!, width: 72, height: 72, fit: BoxFit.cover),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(child: Text('Foto allegata come testimonianza')),
+              IconButton(
+                tooltip: 'Rimuovi foto',
+                icon: const Icon(Icons.close),
+                onPressed: () => setState(() => _photo = null),
+              ),
+            ])
+          else
+            OutlinedButton.icon(
+              onPressed: _takePhoto,
+              icon: const Icon(Icons.photo_camera_outlined),
+              label: const Text('Allega foto del termometro'),
+            ),
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(_error!, style: TextStyle(color: cs.error)),

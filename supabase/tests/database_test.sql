@@ -1404,6 +1404,30 @@ do $$ begin
   end;
 end $$;
 
+-- =====================================================================
+-- T19 - Foto a testimonianza delle temperature
+-- =====================================================================
+reset role; select pg_temp.login(current_setting('t.ub')::uuid);
+do $$
+declare r uuid := gen_random_uuid();
+begin
+  insert into temp_readings (id, company_id, site_id, control_point_id, value_c, measured_at,
+                             photo_path, photo_hash)
+  values (r, current_setting('t.co1')::uuid, current_setting('t.site1')::uuid,
+          current_setting('t.cp1')::uuid, 4.0, now(),
+          current_setting('t.co1') || '/temp/' || r || '.jpg', repeat('a', 64));
+  assert (select photo_path from temp_readings where id = r) is not null, 'T19: foto non salvata';
+  assert (select row_hash from temp_readings where id = r) is not null, 'T19: manca la catena di hash';
+  begin
+    insert into temp_readings (id, company_id, site_id, control_point_id, value_c, measured_at, photo_path)
+    values (gen_random_uuid(), current_setting('t.co1')::uuid, current_setting('t.site1')::uuid,
+            current_setting('t.cp1')::uuid, 4.0, now(), 'x.jpg');
+    raise exception 'T19: percorso foto senza impronta accettato';
+  exception when check_violation then null;
+  end;
+  assert exists (select 1 from storage.buckets where id = 'temp-photos' and not public), 'T19: bucket mancante o pubblico';
+end $$;
+
 reset role;
 rollback;
 \echo 'TUTTI I TEST DATABASE SUPERATI'

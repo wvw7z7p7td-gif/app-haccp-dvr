@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../auth/providers.dart';
 import 'pending_queue.dart';
@@ -27,7 +29,19 @@ class PendingCountNotifier extends AutoDisposeAsyncNotifier<int> {
   }
 
   Future<void> _send(PendingOp op) async {
-    await ref.read(supabaseProvider).from(op.table).insert(op.payload);
+    final db = ref.read(supabaseProvider);
+    if (op.uploadB64 != null && op.uploadBucket != null && op.uploadPath != null) {
+      try {
+        await db.storage.from(op.uploadBucket!).uploadBinary(
+              op.uploadPath!,
+              base64Decode(op.uploadB64!),
+              fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: false),
+            );
+      } on StorageException catch (e) {
+        if (e.statusCode != '409') rethrow;
+      }
+    }
+    await db.from(op.table).insert(op.payload);
   }
 
   Future<void> refreshCount() async {

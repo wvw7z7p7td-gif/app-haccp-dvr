@@ -158,8 +158,8 @@ class _PointCard extends ConsumerWidget {
     final alert = open > 0 || (last?.outOfRange ?? false);
     final fmt = DateFormat('HH:mm', 'it_IT');
 
-    Future<void> record() async {
-      final r = await showReadingSheet(context, point);
+    Future<void> record({bool photo = false}) async {
+      final r = await showReadingSheet(context, point, startWithPhoto: photo);
       if (r == null || !r.outOfRange || !context.mounted) return;
       await showCorrectiveActionSheet(context, point: point, reading: r);
     }
@@ -187,12 +187,18 @@ class _PointCard extends ConsumerWidget {
                 child: Text(point.name,
                     style: t.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
               ),
-              if (canWrite)
+              if (canWrite) ...[
+                IconButton(
+                  tooltip: 'Foto a testimonianza',
+                  icon: const Icon(Icons.photo_camera, size: 26),
+                  onPressed: () => record(photo: true),
+                ),
                 IconButton(
                   tooltip: 'Registra temperatura',
                   icon: const Icon(Icons.edit_note, size: 28),
                   onPressed: record,
                 ),
+              ],
             ]),
             const SizedBox(height: 4),
             Padding(
@@ -300,6 +306,13 @@ class ControlPointDetail extends ConsumerWidget {
               for (final r in h.readings)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
+                  leading: r.photoPath == null
+                      ? null
+                      : IconButton(
+                          tooltip: 'Vedi foto',
+                          icon: const Icon(Icons.photo_camera_outlined),
+                          onPressed: () => _showPhoto(context, ref, r.photoPath!),
+                        ),
                   title: Text(formatTemp(r.valueC),
                       style: t.textTheme.titleMedium?.copyWith(
                           color: r.outOfRange ? t.colorScheme.error : null)),
@@ -325,4 +338,15 @@ class ControlPointDetail extends ConsumerWidget {
       ],
     );
   }
+}
+
+Future<void> _showPhoto(BuildContext context, WidgetRef ref, String path) async {
+  final url = await ref.read(temperatureRepoProvider)?.photoUrl(path);
+  if (url == null || !context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    builder: (_) => Dialog(
+      child: InteractiveViewer(child: Image.network(url, fit: BoxFit.contain)),
+    ),
+  );
 }

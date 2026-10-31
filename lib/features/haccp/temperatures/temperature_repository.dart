@@ -1,6 +1,12 @@
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'temperature_models.dart';
+
+const tempPhotoBucket = 'temp-photos';
+String tempPhotoPath(String companyId, String readingId) => '$companyId/temp/$readingId.jpg';
 
 class TemperatureRepository {
   TemperatureRepository(this._db, this.companyId);
@@ -77,7 +83,20 @@ class TemperatureRepository {
     required DateTime measuredAt,
     String? employeeId,
     String? notes,
+    Uint8List? photo,
   }) async {
+    String? photoPath;
+    String? photoHash;
+    if (photo != null) {
+      photoPath = tempPhotoPath(companyId, id);
+      try {
+        await _db.storage.from(tempPhotoBucket).uploadBinary(photoPath, photo,
+            fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: false));
+      } on StorageException catch (e) {
+        if (e.statusCode != '409') rethrow; // gia' caricata da un tentativo precedente
+      }
+      photoHash = sha256.convert(photo).toString();
+    }
     try {
       final row = await _db.from('temp_readings').insert({
         'id': id,
@@ -89,6 +108,8 @@ class TemperatureRepository {
         'employee_id': employeeId,
         'source': 'manual',
         'notes': (notes == null || notes.trim().isEmpty) ? null : notes.trim(),
+        'photo_path': photoPath,
+        'photo_hash': photoHash,
       }).select().single();
       return TempReading.fromMap(row);
     } on PostgrestException catch (e) {
@@ -156,4 +177,7 @@ class TemperatureRepository {
 
   Future<void> deactivateControlPoint(String id) =>
       _db.from('temp_control_points').update({'active': false}).eq('id', id);
+
+  Future<String?> photoUrl(String path) =>
+      _db.storage.from(tempPhotoBucket).createSignedUrl(path, 300);
 }
