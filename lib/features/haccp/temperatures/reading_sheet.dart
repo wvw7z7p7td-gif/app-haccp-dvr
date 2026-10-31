@@ -3,6 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../core/auth/providers.dart';
+
+import '../../../core/offline/offline_providers.dart';
+import '../../../core/offline/pending_queue.dart';
 import '../../../shared/widgets/operator_selector.dart';
 import 'temperature_models.dart';
 import 'temperature_providers.dart';
@@ -78,12 +82,52 @@ class _ReadingSheetState extends ConsumerState<_ReadingSheet> {
       ref.invalidate(tempOverviewProvider);
       ref.invalidate(tempHistoryProvider(widget.point.id));
       if (mounted) Navigator.of(context).pop(saved);
-    } catch (_) {
-      setState(() => _error =
-          'Registrazione NON salvata (connessione assente o errore). Riprova.');
+    } catch (e) {
+      if (isPermanentRejection(e)) {
+        setState(() => _error = 'Registrazione rifiutata dal server. Controlla i dati.');
+      } else {
+        // Nessuna connessione: la rilevazione resta sul dispositivo e parte appena si torna online.
+        await _queueOffline(v);
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _queueOffline(double v) async {
+    final queue = ref.read(pendingQueueProvider);
+    final m = ref.read(activeMembershipProvider);
+    if (queue == null || m == null) {
+      setState(() => _error = 'Registrazione NON salvata (connessione assente). Riprova.');
+      return;
+    }
+    final notes = _notes.text.trim();
+    await queue.add(PendingOp(
+      table: 'temp_readings',
+      queuedAt: DateTime.now(),
+      payload: {
+        'id': _id,
+        'company_id': m.companyId,
+        'site_id': widget.point.siteId,
+        'control_point_id': widget.point.id,
+        'value_c': v,
+        'measured_at': _measuredAt.toUtc().toIso8601String(),
+        'employee_id': _op.employee?.id,
+        'source': 'manual',
+        'notes': notes.isEmpty ? null : notes,
+      },
+    ));
+    await ref.read(pendingCountProvider.notifier).refreshCount();
+    if (!mounted) return;
+    final out = widget.point.isOutOfRange(v);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      duration: const Duration(seconds: 6),
+      content: Text(out
+          ? 'Offline: rilevazione salvata sul dispositivo. ATTENZIONE: valore fuori limite, '
+              'gestisci subito il prodotto e registra l\'azione correttiva appena torni online.'
+          : 'Offline: rilevazione salvata sul dispositivo, verra\' inviata appena torna la connessione.'),
+    ));
+    Navigator.of(context).pop();
   }
 
   @override

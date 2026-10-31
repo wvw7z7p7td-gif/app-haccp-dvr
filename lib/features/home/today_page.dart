@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/auth/providers.dart';
+import '../../core/offline/offline_providers.dart';
 import '../../shared/widgets/page_scaffold.dart';
 import '../alerts/alert_models.dart';
 import '../alerts/alert_providers.dart';
@@ -28,6 +29,7 @@ class TodayPage extends ConsumerWidget {
     final menu = ref.watch(menuDataProvider);
     final pest = ref.watch(pestDataProvider);
     final alerts = ref.watch(alertsProvider);
+    final pending = ref.watch(pendingCountProvider).valueOrNull ?? 0;
     final critical = alerts.where((a) => a.severity == AlertSeverity.critical).length;
 
     final tempSubtitle = temps.when(
@@ -149,6 +151,15 @@ class TodayPage extends ConsumerWidget {
             alert: pestAlert,
             onTap: () => context.push('/infestanti'),
           ),
+          if (pending > 0)
+            _TaskCard(
+              icon: Icons.cloud_upload_outlined,
+              title: 'Da inviare',
+              subtitle: '$pending registrazion${pending == 1 ? 'e' : 'i'} salvat${pending == 1 ? 'a' : 'e'} '
+                  'sul dispositivo. Tocca per riprovare.',
+              alert: true,
+              onTap: () => ref.read(pendingCountProvider.notifier).flush(),
+            ),
           _TaskCard(
             icon: Icons.notifications_active_outlined,
             title: 'Avvisi e scadenze',
