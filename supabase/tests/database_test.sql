@@ -1425,6 +1425,10 @@ begin
     raise exception 'T19: percorso foto senza impronta accettato';
   exception when check_violation then null;
   end;
+end $$;
+
+reset role;
+do $$ begin
   assert exists (select 1 from storage.buckets where id = 'temp-photos' and not public), 'T19: bucket mancante o pubblico';
 end $$;
 
